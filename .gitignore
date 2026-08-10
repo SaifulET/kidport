@@ -11,4 +11,5 @@ coverage/
 *.cert
 secrets/
 secret/
+
 *.secret

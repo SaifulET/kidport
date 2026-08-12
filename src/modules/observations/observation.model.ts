@@ -22,7 +22,11 @@ const observationSchema = new Schema(
     classroomId: { type: Schema.Types.ObjectId, ref: 'Classroom', index: true },
     type: { type: String, enum: ['text', 'voice', 'photo', 'video'], required: true, index: true },
     text: String,
+    title: String,
+    description: String,
+    progress: Number,
     media: [observationMediaSchema],
+    icon: String,
     domainId: { type: Schema.Types.ObjectId, ref: 'DevelopmentDomain', index: true },
     indicatorId: { type: Schema.Types.ObjectId, ref: 'DevelopmentIndicator', index: true },
     stage: { type: String, enum: STAGE_VALUES },
@@ -41,6 +45,18 @@ observationSchema.index({ childId: 1, domainId: 1, createdAt: -1 });
 observationSchema.index({ authorId: 1, createdAt: -1 });
 observationSchema.index({ isMilestone: 1, childId: 1 });
 observationSchema.index({ classroomId: 1, createdAt: -1 });
+
+const transformObservation = (_doc: unknown, ret: Record<string, unknown>) => {
+  const media = ret.media as Array<{ url?: string } | string> | undefined;
+  ret.media = media?.map((item) => (typeof item === 'string' ? item : item.url)).filter(Boolean) ?? [];
+  ret.icon = ret.icon ?? null;
+  ret.observation = ret.text;
+  ret.keyword = ret.stage;
+  return ret;
+};
+
+observationSchema.set('toJSON', { transform: transformObservation });
+observationSchema.set('toObject', { transform: transformObservation });
 
 export type ObservationAttrs = InferSchemaType<typeof observationSchema>;
 export const Observation = model('Observation', observationSchema);

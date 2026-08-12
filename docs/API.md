@@ -108,6 +108,7 @@ Response:
       "_id": "66f...",
       "fullName": "Jane Parent",
       "email": "jane@example.com",
+      "profilePhoto": null,
       "userType": "caregiver",
       "caregiverRole": "mother",
       "status": "active"
@@ -143,7 +144,8 @@ Response:
     "user": {
       "_id": "66f...",
       "fullName": "Jane Parent",
-      "email": "jane@example.com"
+      "email": "jane@example.com",
+      "profilePhoto": "https://kidport.s3.eu-north-1.amazonaws.com/users/66f.../profile/photo.jpg"
     },
     "accessToken": "jwt...",
     "refreshToken": "opaque-refresh-token"
@@ -290,6 +292,7 @@ Response:
     "email": "jane@example.com",
     "userType": "caregiver",
     "caregiverRole": "mother",
+    "profilePhoto": "https://kidport.s3.eu-north-1.amazonaws.com/users/66f.../profile/photo.jpg",
     "status": "active"
   }
 }
@@ -372,6 +375,39 @@ Response:
 }
 ```
 
+### POST `/legal/:key`
+
+Auth: required
+
+Creates a new active legal document version. `key` must be `terms`, `privacy-policy`, or `ai-disclaimer`. Existing active documents with the same key are archived.
+
+Request body:
+
+```json
+{
+  "content": "Full legal terms..."
+}
+```
+
+Optional fields: `version`, `title`, `effectiveAt`. If omitted, `version` uses the effective date as `YYYY-MM-DD`, `title` uses the default title for the document type, and `effectiveAt` uses the current time.
+
+Response:
+
+```json
+{
+  "success": true,
+  "message": "Legal document created",
+  "data": {
+    "_id": "66f...",
+    "key": "terms",
+    "version": "2026-08-11",
+    "title": "Terms and Conditions",
+    "content": "Full legal terms...",
+    "status": "active"
+  }
+}
+```
+
 ## Profile
 
 ### GET `/profile`
@@ -388,6 +424,7 @@ Response:
     "_id": "66f...",
     "fullName": "Jane Parent",
     "email": "jane@example.com",
+    "profilePhoto": "https://kidport.s3.eu-north-1.amazonaws.com/users/66f.../profile/photo.jpg",
     "phoneNumber": "+15555555555",
     "bio": "..."
   }
@@ -421,6 +458,26 @@ Response:
 }
 ```
 
+### GET `/profile/stats`
+
+Auth: required
+
+Returns dashboard card counts for the logged-in caregiver across all children they can access.
+
+Response:
+
+```json
+{
+  "success": true,
+  "message": "Caregiver stats",
+  "data": {
+    "totalObservations": 127,
+    "totalMilestones": 15,
+    "associatedChildren": 4
+  }
+}
+```
+
 ### PATCH `/profile/photo`
 
 Auth: required
@@ -440,10 +497,7 @@ Response:
   "success": true,
   "message": "Profile photo updated",
   "data": {
-    "key": "users/66f.../profile/...",
-    "mimeType": "image/jpeg",
-    "size": 12345,
-    "originalName": "profile.jpg"
+    "profileImage": "https://kidport.s3.eu-north-1.amazonaws.com/users/66f.../profile/photo.jpg"
   }
 }
 ```
@@ -483,15 +537,13 @@ Request body:
 
 ```json
 {
-  "language": "en",
   "notifications": {
-    "milestoneAchievements": true,
-    "careCircleUpdates": false,
-    "aiInsights": true,
-    "weeklyReports": true
+    "aiInsights": false
   }
 }
 ```
+
+Notification updates are partial. Sending one notification field updates only that field and keeps the previous values for the others.
 
 Response:
 
@@ -535,25 +587,36 @@ Child access is allowed only for the child owner, accepted care circle members, 
 
 Auth: required
 
-Request body:
+Content type: `multipart/form-data`
+
+Fields:
+
+```text
+photo: image/jpeg | image/png | image/webp
+name: Leo Martinez
+nickname: Leo
+dob: 2024-09-02
+gender: Male
+bloodType: O+
+height: 32
+weight: 25
+```
+
+Required fields: `name`, `dob`, `gender`.
+
+`height` is stored as inches and `weight` is stored as lbs when sent as simple numbers. JSON is also supported by sending `fullName` and `dateOfBirth` instead of `name` and `dob`.
+
+JSON body:
 
 ```json
 {
-  "fullName": "Ava Smith",
-  "nickname": "Ava",
-  "dateOfBirth": "2023-04-12",
-  "gender": "female",
+  "fullName": "Leo Martinez",
+  "nickname": "Leo",
+  "dateOfBirth": "2024-09-02",
+  "gender": "male",
   "bloodType": "O+",
-  "height": {
-    "value": 94,
-    "unit": "cm",
-    "measuredAt": "2026-08-01"
-  },
-  "weight": {
-    "value": 14,
-    "unit": "kg",
-    "measuredAt": "2026-08-01"
-  }
+  "height": 32,
+  "weight": 25
 }
 ```
 
@@ -565,9 +628,20 @@ Response:
   "message": "Child created",
   "data": {
     "_id": "66f...",
-    "fullName": "Ava Smith",
-    "nickname": "Ava",
-    "dateOfBirth": "2023-04-12T00:00:00.000Z",
+    "fullName": "Leo Martinez",
+    "nickname": "Leo",
+    "profileImage": "https://kidport.s3.eu-north-1.amazonaws.com/children/66f.../profile/photo.jpg",
+    "dateOfBirth": "2024-09-02T00:00:00.000Z",
+    "gender": "male",
+    "bloodType": "O+",
+    "height": {
+      "value": 32,
+      "unit": "in"
+    },
+    "weight": {
+      "value": 25,
+      "unit": "lbs"
+    },
     "createdBy": "66f...",
     "caregivers": ["66f..."],
     "status": "active",
@@ -617,9 +691,7 @@ Response:
   "data": [
     {
       "id": "66f...",
-      "profileImage": {
-        "key": "children/66f.../profile/..."
-      },
+      "profileImage": "https://kidport.s3.eu-north-1.amazonaws.com/children/66f.../profile/photo.jpg",
       "name": "Ava",
       "age": {
         "years": 3,
@@ -665,13 +737,13 @@ Request body:
 
 ```json
 {
-  "nickname": "Avie",
+  "name": "Leo Martinez",
+  "nickname": "Leo",
+  "dob": "2024-09-02",
+  "gender": "Male",
   "bloodType": "O+",
-  "height": {
-    "value": 95,
-    "unit": "cm",
-    "measuredAt": "2026-08-10"
-  }
+  "height": 32,
+  "weight": 25
 }
 ```
 
@@ -721,12 +793,7 @@ Response:
   "success": true,
   "message": "Child profile photo updated",
   "data": {
-    "_id": "66f...",
-    "profilePhoto": {
-      "key": "children/66f.../profile/...",
-      "mimeType": "image/jpeg",
-      "size": 12345
-    }
+    "profileImage": "https://kidport.s3.eu-north-1.amazonaws.com/children/66f.../profile/photo.jpg"
   }
 }
 ```
@@ -757,9 +824,17 @@ Response:
         "name": "Language & Literacy",
         "percentage": 75,
         "stage": "steady",
+        "keyword": "improving",
         "observationCount": 12
       }
     ],
+    "observationSummary": {
+      "childId": "66f...",
+      "achieved": 3,
+      "inProgress": 2,
+      "upcoming": 2,
+      "lastCalculatedAt": "2026-08-10T00:00:00.000Z"
+    },
     "pediatricReport": {
       "overallScore": 72.5
     },
@@ -788,7 +863,8 @@ Response:
       "userId": {
         "_id": "66f...",
         "fullName": "Jane Parent",
-        "email": "jane@example.com"
+        "email": "jane@example.com",
+        "profilePhoto": "https://kidport.s3.eu-north-1.amazonaws.com/users/66f.../profile/photo.jpg"
       },
       "role": "mother",
       "relationship": "mother",
@@ -825,9 +901,10 @@ Response:
 ```json
 {
   "success": true,
-  "message": "Care circle invitation sent",
+  "message": "Care circle invitation queued",
   "data": {
-    "invitationId": "66f..."
+    "invitationId": "66f...",
+    "emailStatus": "queued"
   }
 }
 ```
@@ -836,6 +913,11 @@ Notes:
 
 - Sending email does not grant access.
 - Access is granted only after explicit invitation acceptance.
+- Valid unregistered emails can receive invitations. After registering with that same email, the invitee can accept the invitation.
+- Invalid email formats are rejected with `Invalid email`.
+- A caregiver cannot invite their own email.
+- Duplicate active care-circle members or pending invitations are rejected.
+- Only the account matching the invited email can accept the invitation link.
 
 ### PATCH `/children/:childId/care-circle/:memberId`
 
@@ -883,7 +965,7 @@ Response:
 }
 ```
 
-### POST `/care-circle/invitations/:token/accept`
+### GET `/care-circle/invitations/:token/accept`
 
 Auth: required
 
@@ -906,11 +988,41 @@ Response:
 
 Possible errors: `400`, `403`
 
+`POST /care-circle/invitations/:token/accept` is also supported for clients that prefer a non-GET state-changing request.
+
 ## Daycares
+
+Parents/caregivers can list and view active daycares so they can send child assignment invitations. Only daycare accounts can create daycare records. Only the daycare owner can update or delete their daycare information.
+
+### GET `/daycares`
+
+Auth: required
+
+Returns all active daycares.
+
+Response:
+
+```json
+{
+  "success": true,
+  "message": "Daycares",
+  "data": [
+    {
+      "_id": "66f...",
+      "name": "Sunflower Daycare",
+      "description": "Early childhood care center",
+      "address": "123 Main St",
+      "phoneNumber": "+15555555555",
+      "email": "admin@sunflower.example",
+      "status": "active"
+    }
+  ]
+}
+```
 
 ### POST `/daycares`
 
-Auth: required
+Auth: required, daycare account required
 
 Request body:
 
@@ -941,7 +1053,7 @@ Response:
 
 ### GET `/daycares/:daycareId`
 
-Auth: required, daycare member required
+Auth: required
 
 Response:
 
@@ -958,7 +1070,7 @@ Response:
 
 ### PATCH `/daycares/:daycareId`
 
-Auth: required, daycare admin required
+Auth: required, daycare owner required
 
 Request body:
 
@@ -969,6 +1081,22 @@ Request body:
   "address": "123 Main St",
   "phoneNumber": "+15555555555",
   "email": "admin@sunflower.example"
+}
+```
+
+### DELETE `/daycares/:daycareId`
+
+Auth: required, daycare owner required
+
+Soft-deletes the daycare and removes its daycare member records.
+
+Response:
+
+```json
+{
+  "success": true,
+  "message": "Daycare deleted",
+  "data": null
 }
 ```
 
@@ -1088,9 +1216,10 @@ Response:
 ```json
 {
   "success": true,
-  "message": "Daycare invitation sent",
+  "message": "Daycare invitation queued",
   "data": {
-    "invitationId": "66f..."
+    "invitationId": "66f...",
+    "emailStatus": "queued"
   }
 }
 ```
@@ -1116,7 +1245,7 @@ Response:
 }
 ```
 
-### POST `/daycare-invitations/:token/accept`
+### GET `/daycare-invitations/:token/accept`
 
 Auth: required, daycare member required for invited daycare
 
@@ -1137,6 +1266,8 @@ Response:
   }
 }
 ```
+
+`POST /daycare-invitations/:token/accept` is also supported for clients that prefer a non-GET state-changing request.
 
 ### GET `/daycares/:daycareId/children/unassigned`
 
@@ -1348,12 +1479,11 @@ Request body:
 
 ```json
 {
-  "name": "Language & Literacy",
-  "slug": "language-literacy",
-  "description": "Language and early literacy indicators",
-  "sortOrder": 1
+  "name": "Language & Literacy"
 }
 ```
+
+The backend generates `slug` from `name`.
 
 Response:
 
@@ -1560,21 +1690,36 @@ Request fields:
 
 ```json
 {
-  "type": "photo",
-  "text": "Ava named three colors during play.",
-  "domainId": "66f...",
-  "indicatorId": "66f...",
-  "stage": "steady",
-  "mood": "happy",
-  "occurredAt": "2026-08-10T10:00:00.000Z"
+  "observation": "Ava named three colors during play.",
+  "keyword": "steady",
+  "domain": "Language & Literacy",
+  "react": "love"
 }
 ```
+
+Required fields: `keyword`, `domain`, and either `observation` text or a media file.
+
+`keyword` must be one of `emerging`, `building`, `steady`, or `confident`.
+
+`domain` can be a domain id, exact domain name, or slug. `domainId` is also supported.
 
 Multipart media field:
 
 ```text
-media: one or more files
+media: one or more image, audio, or video files
 ```
+
+`observation` can also be used as the file field name for media uploads.
+
+When `type` is omitted, the backend infers it from `media`; if no media is uploaded, it uses `text`.
+
+If a caregiver uploads an image, audio, or video without observation text, the backend saves the media to S3 and generates the observation text from that media. Images are converted to a short visible-behavior observation. Audio and video are transcribed. This requires `OPENAI_API_KEY`; if AI conversion is unavailable, the backend stores a fallback media-upload note as the observation text.
+
+For every observation type, including plain text, the backend also generates/refines card display fields: `title`, `description`, `progress`, and emoji-style `icon` such as `\uD83C\uDFE0` or `\uD83D\uDCAC`.
+
+Optional fields: `type`, `text`, `stage`, `indicatorId`, `mood`, `occurredAt`, `reaction`.
+
+If `react` is `"love"` or `"true"`, the backend also creates a `love` reaction from the current user for the new observation.
 
 Response:
 
@@ -1583,24 +1728,35 @@ Response:
   "success": true,
   "message": "Observation created successfully",
   "data": {
-    "_id": "66f...",
-    "childId": "66f...",
-    "authorId": "66f...",
-    "type": "photo",
-    "text": "Ava named three colors during play.",
-    "domainId": "66f...",
-    "indicatorId": "66f...",
-    "stage": "steady",
-    "stageScore": 3,
-    "isMilestone": false,
-    "media": [],
-    "status": "active"
+    "id": "66f...",
+    "author": {
+      "fullName": "Sarah Martinez",
+      "role": "Mom",
+      "profilePhoto": "https://kidport.s3.eu-north-1.amazonaws.com/users/66f.../profile/photo.jpg",
+      "initials": "SM"
+    },
+    "timeAgo": "2 hours ago",
+    "observation": "Ava named three colors during play.",
+    "title": "Names three colors",
+    "description": "Ava identified three colors accurately during play.",
+    "progress": 75,
+    "icon": "\uD83C\uDFA8",
+    "milestone": {
+      "detected": true,
+      "title": "AI Milestone Detected",
+      "domain": "Language",
+      "indicator": "Using 3-word sentences"
+    },
+    "reactions": 6,
+    "comments": 2,
+    "media": [
+      "https://kidport.s3.eu-north-1.amazonaws.com/children/66f.../observations/images/photo.jpg"
+    ]
   }
 }
 ```
 
 Possible errors: `400`, `403`, `404`, `503`
-
 ### POST `/children/:childId/observations/text`
 
 Auth: required, child access required
@@ -1691,11 +1847,79 @@ Response:
   "success": true,
   "message": "Observation",
   "data": {
-    "_id": "66f...",
-    "childId": "66f...",
-    "type": "text",
-    "stage": "steady",
-    "stageScore": 3
+    "id": "66f...",
+    "author": {
+      "fullName": "Sarah Martinez",
+      "role": "Mom",
+      "profilePhoto": "https://kidport.s3.eu-north-1.amazonaws.com/users/66f.../profile/photo.jpg",
+      "initials": "SM"
+    },
+    "timeAgo": "2 hours ago",
+    "observation": "Ava named three colors during play.",
+    "title": "Names three colors",
+    "description": "Ava identified three colors accurately during play.",
+    "progress": 75,
+    "icon": "\uD83C\uDFA8",
+    "milestone": null,
+    "reactions": 6,
+    "comments": 2,
+    "media": []
+  }
+}
+```
+
+### GET `/observations/:observationId/details`
+
+Auth: required, child access required through observation
+
+Returns one specific observation, total comment count, and all active comment details for that observation.
+
+Response:
+
+```json
+{
+  "success": true,
+  "message": "Observation details",
+  "data": {
+    "observation": {
+      "id": "66f...",
+      "author": {
+        "fullName": "Sarah Martinez",
+        "role": "Mom",
+        "profilePhoto": "https://kidport.s3.eu-north-1.amazonaws.com/users/66f.../profile/photo.jpg",
+        "initials": "SM"
+      },
+      "timeAgo": "2 hours ago",
+      "observation": "Emma said her first complete sentence today.",
+      "title": "Uses 3-word sentences",
+      "description": "Emma can now form simple 3-word sentences.",
+      "progress": 80,
+      "icon": "\uD83D\uDCAC",
+      "milestone": {
+        "detected": true,
+        "title": "AI Milestone Detected",
+        "domain": "Language",
+        "indicator": "Using 3-word sentences"
+      },
+      "reactions": 6,
+      "comments": 2,
+      "media": []
+    },
+    "totalComments": 2,
+    "comments": [
+      {
+        "id": "66f...",
+        "author": {
+          "fullName": "David Martinez",
+          "role": "Dad",
+          "profilePhoto": "https://kidport.s3.eu-north-1.amazonaws.com/users/66f.../profile/photo.jpg",
+          "initials": "DM"
+        },
+        "text": "So proud of her! Can't wait to hear more sentences!",
+        "timeAgo": "1 hour ago",
+        "reactions": 2
+      }
+    ]
   }
 }
 ```
@@ -1720,6 +1944,7 @@ Response:
         "name": "Language & Literacy",
         "percentage": 75,
         "stage": "steady",
+        "keyword": "improving",
         "observationCount": 12
       },
       {
@@ -1727,6 +1952,7 @@ Response:
         "name": "Motor",
         "percentage": null,
         "stage": "not_enough_data",
+        "keyword": "not-enough-data",
         "observationCount": 0
       }
     ],
@@ -1734,6 +1960,32 @@ Response:
   }
 }
 ```
+
+Domain `keyword` is generated from that child's observations in the domain. Possible values: `improving`, `stable`, `needs-support`, `not-enough-data`.
+
+### GET `/children/:childId/observation-summary`
+
+Auth: required, child access required
+
+Returns the three dashboard counts for the child. The backend recalculates these from the child's latest observations each time this API is called, so the values update after new observations are created.
+
+Response:
+
+```json
+{
+  "success": true,
+  "message": "Observation summary",
+  "data": {
+    "childId": "66f...",
+    "achieved": 3,
+    "inProgress": 2,
+    "upcoming": 2,
+    "lastCalculatedAt": "2026-08-10T00:00:00.000Z"
+  }
+}
+```
+
+AI can refine the status counts from the child observation data. If AI is unavailable, the backend uses deterministic fallback logic: `confident` latest items are `achieved`, observed non-confident items are `inProgress`, and unobserved age-band indicators are `upcoming`.
 
 ## Feed and Activity
 
@@ -1760,19 +2012,23 @@ Response:
   "message": "Feed",
   "data": [
     {
-      "_id": "66f...",
-      "childId": {
-        "_id": "66f...",
-        "fullName": "Ava Smith"
+      "id": "66f...",
+      "author": {
+        "fullName": "Sarah Martinez",
+        "role": "Mom",
+        "profilePhoto": "https://kidport.s3.eu-north-1.amazonaws.com/users/66f.../profile/photo.jpg",
+        "initials": "SM"
       },
-      "authorId": {
-        "_id": "66f...",
-        "fullName": "Jane Parent"
-      },
-      "type": "text",
-      "stage": "steady",
-      "isMilestone": false,
-      "createdAt": "2026-08-10T00:00:00.000Z"
+      "timeAgo": "2 hours ago",
+      "observation": "Ava named three colors during play.",
+      "title": "Names three colors",
+      "description": "Ava identified three colors accurately during play.",
+      "progress": 75,
+      "icon": "\uD83C\uDFA8",
+      "milestone": null,
+      "reactions": 6,
+      "comments": 2,
+      "media": []
     }
   ],
   "pagination": {
@@ -1787,6 +2043,8 @@ Response:
 ### GET `/children/:childId/activities`
 
 Auth: required, child access required
+
+`data` items use the same compact observation-card shape as `/feed`.
 
 Query parameters:
 
@@ -1815,6 +2073,8 @@ Response:
 
 Auth: required, child access required
 
+`data` items use the same compact observation-card shape as `/feed`.
+
 Query parameters:
 
 ```text
@@ -1835,7 +2095,7 @@ Response:
 
 Auth: required
 
-Note: top-level group placeholder exists. Prefer `/children/:childId/activity-history` for child-specific data.
+Returns paginated observations across all children the authenticated user can access. Supports the same query parameters as `/feed`: `page`, `limit`, `childId`, `domainId`, `startDate`, and `endDate`.
 
 ## Milestones and Achievements
 
@@ -1849,6 +2109,8 @@ Query parameters:
 domain=66f...
 ```
 
+Returns observations marked as milestones using the same compact observation-card shape.
+
 Response:
 
 ```json
@@ -1857,20 +2119,30 @@ Response:
   "message": "Milestones",
   "data": [
     {
-      "_id": "66f...",
-      "childId": "66f...",
-      "indicatorId": {
-        "_id": "66f...",
-        "title": "Uses 3-word sentences"
+      "id": "66f...",
+      "author": {
+        "fullName": "Sarah Martinez",
+        "role": "Mom",
+        "profilePhoto": "https://kidport.s3.eu-north-1.amazonaws.com/users/66f.../profile/photo.jpg",
+        "initials": "SM"
       },
-      "domainId": {
-        "_id": "66f...",
-        "name": "Language & Literacy"
+      "timeAgo": "2 hours ago",
+      "observation": "Ava named three colors during play.",
+      "title": "Uses 3-word sentences",
+      "description": "Ava used short phrases while describing colors during play.",
+      "progress": 100,
+      "icon": "\uD83D\uDCAC",
+      "milestone": {
+        "detected": true,
+        "title": "AI Milestone Detected",
+        "domain": "Language & Literacy",
+        "indicator": "Uses 3-word sentences"
       },
-      "stage": "confident",
-      "stageScore": 4,
-      "isMilestone": true,
-      "occurredAt": "2026-08-10T00:00:00.000Z"
+      "reactions": 6,
+      "comments": 2,
+      "media": [
+        "https://kidport.s3.eu-north-1.amazonaws.com/children/66f.../observations/images/photo.jpg"
+      ]
     }
   ]
 }
@@ -1880,6 +2152,8 @@ Response:
 
 Auth: required, child access required
 
+Currently returns the same milestone observation-card shape as `/children/:childId/milestones`.
+
 Response:
 
 ```json
@@ -1888,19 +2162,32 @@ Response:
   "message": "Achievements",
   "data": [
     {
-      "_id": "66f...",
-      "indicatorId": {
-        "_id": "66f...",
-        "title": "Walked 10 Steps Independently"
+      "id": "66f...",
+      "author": {
+        "fullName": "Sarah Martinez",
+        "role": "Mom",
+        "profilePhoto": "https://kidport.s3.eu-north-1.amazonaws.com/users/66f.../profile/photo.jpg",
+        "initials": "SM"
       },
-      "stage": "confident",
-      "isMilestone": true,
-      "occurredAt": "2026-08-10T00:00:00.000Z"
+      "timeAgo": "2 hours ago",
+      "observation": "Ava walked 10 steps independently.",
+      "title": "Walks independently",
+      "description": "Ava walked 10 steps without support.",
+      "progress": 100,
+      "icon": "\uD83D\uDEB6",
+      "milestone": {
+        "detected": true,
+        "title": "AI Milestone Detected",
+        "domain": "Motor",
+        "indicator": "Walked 10 Steps Independently"
+      },
+      "reactions": 6,
+      "comments": 2,
+      "media": []
     }
   ]
 }
 ```
-
 ### GET `/milestones`
 
 Auth: required
@@ -1950,12 +2237,16 @@ Response:
   "success": true,
   "message": "Comment created",
   "data": {
-    "_id": "66f...",
-    "observationId": "66f...",
-    "childId": "66f...",
-    "authorId": "66f...",
-    "text": "So proud of this progress!",
-    "status": "active"
+    "id": "66f...",
+    "author": {
+      "fullName": "David Martinez",
+      "role": "Dad",
+      "profilePhoto": "https://kidport.s3.eu-north-1.amazonaws.com/users/66f.../profile/photo.jpg",
+      "initials": "DM"
+    },
+    "text": "So proud of her! Can't wait to hear more sentences!",
+    "timeAgo": "Just now",
+    "reactions": 0
   }
 }
 ```
@@ -1977,7 +2268,20 @@ Response:
 {
   "success": true,
   "message": "Comments",
-  "data": [],
+  "data": [
+    {
+      "id": "66f...",
+      "author": {
+        "fullName": "David Martinez",
+        "role": "Dad",
+        "profilePhoto": "https://kidport.s3.eu-north-1.amazonaws.com/users/66f.../profile/photo.jpg",
+        "initials": "DM"
+      },
+      "text": "So proud of her! Can't wait to hear more sentences!",
+      "timeAgo": "1 hour ago",
+      "reactions": 0
+    }
+  ],
   "pagination": {
     "page": 1,
     "limit": 20,
@@ -2012,6 +2316,68 @@ Response:
 }
 ```
 
+### POST `/comments/:commentId/reactions`
+
+Auth: required, child access required through comment
+
+Saves a `love` reaction from the current caregiver to a comment. A caregiver can react only once to the same comment.
+
+Request body:
+
+```json
+{
+  "type": "love"
+}
+```
+
+Response:
+
+```json
+{
+  "success": true,
+  "message": "Comment reaction saved",
+  "data": {
+    "id": "66f...",
+    "author": {
+      "fullName": "David Martinez",
+      "role": "Dad",
+      "profilePhoto": "https://kidport.s3.eu-north-1.amazonaws.com/users/66f.../profile/photo.jpg",
+      "initials": "DM"
+    },
+    "text": "So proud of her! Can't wait to hear more sentences!",
+    "timeAgo": "1 hour ago",
+    "reactions": 2
+  }
+}
+```
+
+### DELETE `/comments/:commentId/reactions`
+
+Auth: required, child access required through comment
+
+Removes the current caregiver's `love` reaction from a comment.
+
+Response:
+
+```json
+{
+  "success": true,
+  "message": "Comment reaction removed",
+  "data": {
+    "id": "66f...",
+    "author": {
+      "fullName": "David Martinez",
+      "role": "Dad",
+      "profilePhoto": "https://kidport.s3.eu-north-1.amazonaws.com/users/66f.../profile/photo.jpg",
+      "initials": "DM"
+    },
+    "text": "So proud of her! Can't wait to hear more sentences!",
+    "timeAgo": "1 hour ago",
+    "reactions": 1
+  }
+}
+```
+
 ### DELETE `/comments/:commentId`
 
 Auth: required, comment author required
@@ -2032,6 +2398,8 @@ Response:
 
 Auth: required, child access required through observation
 
+Saves a `love` reaction from the current caregiver to an observation. A caregiver can react only once to the same observation.
+
 Request body:
 
 ```json
@@ -2040,25 +2408,44 @@ Request body:
 }
 ```
 
-Response:
+Response returns the updated compact observation card, including the latest `reactions` count:
 
 ```json
 {
   "success": true,
   "message": "Reaction saved",
   "data": {
-    "_id": "66f...",
-    "observationId": "66f...",
-    "childId": "66f...",
-    "userId": "66f...",
-    "type": "love"
+    "id": "66f...",
+    "author": {
+      "fullName": "Sarah Martinez",
+      "role": "Mom",
+      "profilePhoto": "https://kidport.s3.eu-north-1.amazonaws.com/users/66f.../profile/photo.jpg",
+      "initials": "SM"
+    },
+    "timeAgo": "2 hours ago",
+    "observation": "Emma said her first complete sentence today.",
+    "title": "Uses 3-word sentences",
+    "description": "Emma can now form simple 3-word sentences.",
+    "progress": 80,
+    "icon": "\uD83D\uDCAC",
+    "milestone": {
+      "detected": true,
+      "title": "AI Milestone Detected",
+      "domain": "Language",
+      "indicator": "Using 3-word sentences"
+    },
+    "reactions": 7,
+    "comments": 2,
+    "media": []
   }
 }
 ```
 
 ### DELETE `/observations/:observationId/reactions`
 
-Auth: required
+Auth: required, child access required through observation
+
+Removes the current caregiver's `love` reaction from an observation.
 
 Request body:
 
@@ -2068,16 +2455,19 @@ Request body:
 }
 ```
 
-Response:
+Response returns the updated compact observation card, including the latest `reactions` count.
 
 ```json
 {
   "success": true,
   "message": "Reaction removed",
-  "data": null
+  "data": {
+    "id": "66f...",
+    "reactions": 6,
+    "comments": 2
+  }
 }
 ```
-
 ## Notifications
 
 ### GET `/notifications`
@@ -2519,7 +2909,7 @@ support/{userId}/
 feature-requests/{userId}/
 ```
 
-## Deterministic Development Score Algorithm
+## Development Score Algorithm
 
 The backend never asks AI to calculate percentages.
 
@@ -2547,9 +2937,12 @@ No observations:
 ```json
 {
   "percentage": null,
-  "stage": "not_enough_data"
+  "stage": "not_enough_data",
+  "keyword": "not-enough-data"
 }
 ```
+
+AI may select the domain `keyword` badge from observations, but the backend falls back to deterministic trend logic when AI is unavailable.
 
 Stage mapping:
 
@@ -2592,6 +2985,7 @@ AWS_REGION
 AWS_ACCESS_KEY_ID
 AWS_SECRET_ACCESS_KEY
 AWS_S3_BUCKET
+AWS_S3_PUBLIC_BASE_URL
 SMTP_HOST
 SMTP_PORT
 SMTP_USER
@@ -2605,7 +2999,7 @@ MOBILE_DEEP_LINK
 
 ## Integration Notes
 
-- AWS S3 uploads require `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and `AWS_S3_BUCKET`.
+- AWS S3 uploads require `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and `AWS_S3_BUCKET`. Uploaded media responses include a `url`; set `AWS_S3_PUBLIC_BASE_URL` for a CloudFront/custom public base URL, or make the bucket objects publicly readable for the default S3 URL to open directly.
 - SMTP email delivery requires `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, and `SMTP_FROM`.
-- OpenAI narrative generation requires `OPENAI_API_KEY`; if it is missing, the API returns a safe fallback message.
+- OpenAI narrative generation, media-to-observation conversion, and observation card fields require `OPENAI_API_KEY`; if it is missing, the API returns safe fallback display text and a fallback emoji icon.
 - AI output is guidance only and must not be presented as a clinical diagnosis.

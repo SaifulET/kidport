@@ -19,11 +19,19 @@ export class StorageService {
     return env.AWS_S3_BUCKET;
   }
 
+  static publicUrl(key: string) {
+    const encodedKey = key.split('/').map(encodeURIComponent).join('/');
+    if (env.AWS_S3_PUBLIC_BASE_URL) return `${env.AWS_S3_PUBLIC_BASE_URL.replace(/\/$/, '')}/${encodedKey}`;
+
+    const bucket = this.requireBucket();
+    return `https://${bucket}.s3.${env.AWS_REGION}.amazonaws.com/${encodedKey}`;
+  }
+
   static async uploadBuffer(prefix: string, file: Express.Multer.File): Promise<StoredMedia> {
     const bucket = this.requireBucket();
     const key = `${prefix}/${Date.now()}-${file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
     await s3.send(new PutObjectCommand({ Bucket: bucket, Key: key, Body: file.buffer, ContentType: file.mimetype }));
-    return { key, mimeType: file.mimetype, size: file.size, originalName: file.originalname };
+    return { key, url: this.publicUrl(key), mimeType: file.mimetype, size: file.size, originalName: file.originalname };
   }
 
   static async presignedPutUrl(key: string, contentType: string) {

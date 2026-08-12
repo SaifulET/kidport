@@ -18,8 +18,25 @@ settingsRouter.get(
 settingsRouter.patch(
   '/',
   asyncHandler(async (req, res) => {
-    const settings = await UserSettings.findOneAndUpdate({ userId: req.user!._id }, { $set: req.body }, { upsert: true, new: true });
-    ok(res, 'Settings updated', settings);
+    const update: Record<string, unknown> = {};
+    const { notifications, ...settings } = req.body;
+
+    Object.entries(settings).forEach(([key, value]) => {
+      if (value !== undefined) update[key] = value;
+    });
+
+    if (notifications && typeof notifications === 'object' && !Array.isArray(notifications)) {
+      Object.entries(notifications).forEach(([key, value]) => {
+        if (value !== undefined) update[`notifications.${key}`] = value;
+      });
+    }
+
+    const settingsDoc = await UserSettings.findOneAndUpdate(
+      { userId: req.user!._id },
+      { $set: update, $setOnInsert: { userId: req.user!._id } },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    );
+    ok(res, 'Settings updated', settingsDoc);
   })
 );
 

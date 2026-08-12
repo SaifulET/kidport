@@ -11,8 +11,22 @@ import { AgeBand } from './age-band.model';
 export const domainsRouter = Router();
 domainsRouter.use(requireAuth);
 
+const slugify = (value: string) =>
+  value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/(^-|-$)/g, '');
+
 domainsRouter.get('/domains', asyncHandler(async (_req, res) => ok(res, 'Development domains', await DevelopmentDomain.find({ status: 'active' }).sort({ sortOrder: 1 }))));
-domainsRouter.post('/domains', validate(z.object({ body: z.object({ name: z.string(), slug: z.string(), description: z.string().optional(), sortOrder: z.number().optional() }) })), asyncHandler(async (req, res) => ok(res, 'Domain created', await DevelopmentDomain.create(req.body), 201)));
+domainsRouter.post(
+  '/domains',
+  validate(z.object({ body: z.object({ name: z.string().min(1) }) })),
+  asyncHandler(async (req, res) => {
+    const name = req.body.name.trim();
+    ok(res, 'Domain created', await DevelopmentDomain.create({ name, slug: slugify(name) }), 201);
+  })
+);
 domainsRouter.patch('/domains/:domainId', asyncHandler(async (req, res) => ok(res, 'Domain updated', await DevelopmentDomain.findByIdAndUpdate(req.params.domainId, { $set: req.body }, { new: true }))));
 
 domainsRouter.get('/age-bands', asyncHandler(async (_req, res) => ok(res, 'Age bands', await AgeBand.find({ status: 'active' }).sort({ minMonths: 1 }))));

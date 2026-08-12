@@ -31,5 +31,15 @@ const childSchema = new Schema(
 );
 
 childSchema.index({ createdBy: 1, status: 1 });
+
+const transformProfilePhoto = (_doc: unknown, ret: Record<string, unknown>) => {
+  const profilePhoto = ret.profilePhoto as { url?: string } | string | undefined;
+  ret.profilePhoto = typeof profilePhoto === 'string' ? profilePhoto : profilePhoto?.url ?? null;
+  return ret;
+};
+
+childSchema.set('toJSON', { transform: transformProfilePhoto });
+childSchema.set('toObject', { transform: transformProfilePhoto });
+
 export type ChildAttrs = InferSchemaType<typeof childSchema>;
 export const Child = model('Child', childSchema);

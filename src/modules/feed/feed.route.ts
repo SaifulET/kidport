@@ -3,12 +3,13 @@ import { requireAuth } from '../../middlewares/auth';
 import { asyncHandler } from '../../utils/asyncHandler';
 import { paginated } from '../../utils/apiResponse';
 import { AccessibleChildrenService } from '../../services/AccessibleChildrenService';
+import { SocialResponseService } from '../../services/SocialResponseService';
 import { Observation } from '../observations/observation.model';
 
 export const feedRouter = Router();
 feedRouter.use(requireAuth);
 
-feedRouter.get('/feed', asyncHandler(async (req, res) => {
+const listAccessibleObservations = (message: string) => asyncHandler(async (req, res) => {
   const page = Number(req.query.page ?? 1);
   const limit = Number(req.query.limit ?? 20);
   const childIds = await AccessibleChildrenService.idsForUser(req.user!._id.toString());
@@ -20,14 +21,14 @@ feedRouter.get('/feed', asyncHandler(async (req, res) => {
   }
   const total = await Observation.countDocuments(filter);
   const items = await Observation.find(filter)
-    .populate('childId authorId daycareId domainId indicatorId', 'fullName nickname profilePhoto name title')
+    .populate('childId daycareId domainId indicatorId', 'fullName nickname profilePhoto name title')
+    .populate('authorId', 'fullName profilePhoto caregiverRole daycareRole userType')
     .sort({ createdAt: -1 })
     .skip((page - 1) * limit)
     .limit(limit);
-  paginated(res, 'Feed', items, page, limit, total);
-}));
+  const counts = await SocialResponseService.observationCountMaps(items.map((item) => item._id));
+  paginated(res, message, SocialResponseService.observations(items, counts), page, limit, total);
+});
 
-feedRouter.get('/activity-history', asyncHandler(async (req, res) => {
-  req.url = '/feed';
-  return undefined;
-}));
+feedRouter.get('/feed', listAccessibleObservations('Feed'));
+feedRouter.get('/activity-history', listAccessibleObservations('Activity history'));

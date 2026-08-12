@@ -32,6 +32,15 @@ const userSchema = new Schema(
   { timestamps: true }
 );
 
+const transformProfilePhoto = (_doc: unknown, ret: Record<string, unknown>) => {
+  const profilePhoto = ret.profilePhoto as { url?: string } | string | undefined;
+  ret.profilePhoto = typeof profilePhoto === 'string' ? profilePhoto : profilePhoto?.url ?? null;
+  return ret;
+};
+
+userSchema.set('toJSON', { transform: transformProfilePhoto });
+userSchema.set('toObject', { transform: transformProfilePhoto });
+
 export type UserAttrs = InferSchemaType<typeof userSchema>;
 export type IUser = HydratedDocument<UserAttrs>;
 export const User = model('User', userSchema);

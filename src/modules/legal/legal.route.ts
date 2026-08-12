@@ -26,6 +26,21 @@ const getDocument = (key: keyof typeof fallback) =>
     ok(res, 'Legal document', doc ?? fallback[key]);
   });
 
+const legalDocumentParamsSchema = z.object({
+  params: z.object({
+    key: z.enum(['terms', 'privacy-policy', 'ai-disclaimer'])
+  })
+});
+
+const createLegalDocumentSchema = legalDocumentParamsSchema.extend({
+  body: z.object({
+    version: z.string().min(1).optional(),
+    title: z.string().min(1).optional(),
+    content: z.string().min(1),
+    effectiveAt: z.coerce.date().optional()
+  })
+});
+
 legalRouter.get('/terms', getDocument('terms'));
 legalRouter.get('/privacy-policy', getDocument('privacy-policy'));
 legalRouter.get('/ai-disclaimer', getDocument('ai-disclaimer'));
@@ -52,5 +67,28 @@ legalRouter.post(
       userAgent: req.get('user-agent')
     });
     ok(res, 'Legal acceptance recorded', acceptance, 201);
+  })
+);
+
+legalRouter.post(
+  '/:key',
+  requireAuth,
+  validate(createLegalDocumentSchema),
+  asyncHandler(async (req, res) => {
+    const key = req.params.key as keyof typeof fallback;
+    const effectiveAt = req.body.effectiveAt ?? new Date();
+    const version = req.body.version ?? effectiveAt.toISOString().slice(0, 10);
+
+    await LegalDocument.updateMany({ key, status: 'active' }, { $set: { status: 'archived' } });
+    const doc = await LegalDocument.create({
+      key,
+      version,
+      title: req.body.title ?? fallback[key].title,
+      content: req.body.content,
+      effectiveAt,
+      status: 'active'
+    });
+
+    ok(res, 'Legal document created', doc, 201);
   })
 );

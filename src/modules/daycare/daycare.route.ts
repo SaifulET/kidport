@@ -4,6 +4,7 @@ import { requireAuth } from '../../middlewares/auth';
 import { requireDaycareAccess, requireDaycareAdmin } from '../../middlewares/authorization';
 import { validate } from '../../middlewares/validate';
 import { asyncHandler } from '../../utils/asyncHandler';
+import { AppError } from '../../utils/AppError';
 import { ok } from '../../utils/apiResponse';
 import { hashToken } from '../../utils/crypto';
 import { InvitationWorkflowService } from '../../services/ObservationService';
@@ -14,8 +15,27 @@ import { DaycareChildAssignment } from './daycare-child-assignment.model';
 export const daycareRouter = Router();
 daycareRouter.use(requireAuth);
 
+const requireDaycareAccount = asyncHandler(async (req, _res, next) => {
+  if (req.user!.userType !== 'daycare') throw new AppError('Only daycare accounts can manage daycare information', 403);
+  next();
+});
+
+const requireDaycareOwner = asyncHandler(async (req, _res, next) => {
+  if (req.user!.userType !== 'daycare') throw new AppError('Only daycare accounts can manage daycare information', 403);
+  const daycare = await Daycare.findOne({ _id: req.params.daycareId, status: { $ne: 'deleted' } });
+  if (!daycare) throw new AppError('Daycare not found', 404);
+  if (daycare.ownerId.toString() !== req.user!._id.toString()) throw new AppError('Only the daycare owner can manage this daycare', 403);
+  next();
+});
+
+daycareRouter.get('/daycares', asyncHandler(async (_req, res) => {
+  const daycares = await Daycare.find({ status: 'active' }).sort({ name: 1 });
+  ok(res, 'Daycares', daycares);
+}));
+
 daycareRouter.post(
   '/daycares',
+  requireDaycareAccount,
   validate(z.object({ body: z.object({ name: z.string().min(1), description: z.string().optional(), address: z.string().optional(), phoneNumber: z.string().optional(), email: z.string().email().optional() }) })),
   asyncHandler(async (req, res) => {
     const daycare = await Daycare.create({ ...req.body, ownerId: req.user!._id });
@@ -24,8 +44,23 @@ daycareRouter.post(
   })
 );
 
-daycareRouter.get('/daycares/:daycareId', requireDaycareAccess(), asyncHandler(async (req, res) => ok(res, 'Daycare', await Daycare.findById(req.params.daycareId))));
-daycareRouter.patch('/daycares/:daycareId', requireDaycareAdmin(), asyncHandler(async (req, res) => ok(res, 'Daycare updated', await Daycare.findByIdAndUpdate(req.params.daycareId, { $set: req.body }, { new: true }))));
+daycareRouter.get('/daycares/:daycareId', asyncHandler(async (req, res) => {
+  const daycare = await Daycare.findOne({ _id: req.params.daycareId, status: 'active' });
+  if (!daycare) throw new AppError('Daycare not found', 404);
+  ok(res, 'Daycare', daycare);
+}));
+
+daycareRouter.patch(
+  '/daycares/:daycareId',
+  requireDaycareOwner,
+  asyncHandler(async (req, res) => ok(res, 'Daycare updated', await Daycare.findByIdAndUpdate(req.params.daycareId, { $set: req.body }, { new: true })))
+);
+
+daycareRouter.delete('/daycares/:daycareId', requireDaycareOwner, asyncHandler(async (req, res) => {
+  await Daycare.updateOne({ _id: req.params.daycareId }, { $set: { status: 'deleted' } });
+  await DaycareMember.updateMany({ daycareId: req.params.daycareId }, { $set: { status: 'removed' } });
+  ok(res, 'Daycare deleted');
+}));
 
 daycareRouter.post(
   '/daycares/:daycareId/members',
@@ -59,10 +94,13 @@ daycareRouter.get('/daycare-invitations/:token', asyncHandler(async (req, res) =
   ok(res, 'Daycare invitation', { token: req.params.token });
 }));
 
-daycareRouter.post('/daycare-invitations/:token/accept', asyncHandler(async (req, res) => {
+const acceptDaycareInvitation = asyncHandler(async (req, res) => {
   const assignment = await InvitationWorkflowService.acceptDaycareAssignment(hashToken(req.params.token), req.user!._id.toString());
   ok(res, 'Daycare assignment accepted', assignment);
-}));
+});
+
+daycareRouter.get('/daycare-invitations/:token/accept', acceptDaycareInvitation);
+daycareRouter.post('/daycare-invitations/:token/accept', acceptDaycareInvitation);
 
 daycareRouter.get('/daycares/:daycareId/children/unassigned', requireDaycareAccess(), asyncHandler(async (req, res) => {
   const assignments = await DaycareChildAssignment.find({ daycareId: req.params.daycareId, status: 'active', classroomId: { $exists: false } }).populate('childId');

@@ -8,7 +8,6 @@ const attachmentSchema = new Schema(
 const supportIssueSchema = new Schema(
   {
     userId: { type: Schema.Types.ObjectId, ref: 'User', required: true, index: true },
-    issueType: { type: String, enum: ['bug_error', 'app_crash', 'performance', 'other'], required: true },
     title: { type: String, required: true },
     description: { type: String, required: true },
     urgency: { type: String, enum: ['low', 'medium', 'high'], required: true },

@@ -35,7 +35,11 @@ export class DevelopmentScoringService {
     return Math.round((valid.reduce((sum, percentage) => sum + percentage, 0) / valid.length) * 10) / 10;
   }
 
-  static async calculateChildProgress(childId: string, query: { startDate?: Date; endDate?: Date } = {}) {
+  static async calculateChildProgress(
+    childId: string,
+    query: { startDate?: Date; endDate?: Date } = {},
+    options: { useAIKeywords?: boolean } = {}
+  ) {
     const domains = await DevelopmentDomain.find({ status: 'active' }).sort({ sortOrder: 1, name: 1 });
     const dateFilter: Record<string, Date> = {};
     if (query.startDate) dateFilter.$gte = query.startDate;
@@ -63,15 +67,20 @@ export class DevelopmentScoringService {
       })
     );
 
-    const keywords = await AIAnalysisService.generateDomainProgressKeywords(
-      results.map((result) => ({
-        domainId: result.domainId,
-        name: result.name,
-        percentage: result.percentage,
-        observationCount: result.observationCount,
-        observations: result.observations
-      }))
-    );
+    const keywordInputs = results.map((result) => ({
+      domainId: result.domainId,
+      name: result.name,
+      percentage: result.percentage,
+      observationCount: result.observationCount,
+      observations: result.observations
+    }));
+    const keywords =
+      options.useAIKeywords === false
+        ? keywordInputs.map((domain) => ({
+            domainId: domain.domainId,
+            keyword: AIAnalysisService.fallbackDomainProgressKeyword(domain)
+          }))
+        : await AIAnalysisService.generateDomainProgressKeywords(keywordInputs);
     const keywordByDomain = new Map(keywords.map((item) => [item.domainId, item.keyword]));
     const responseDomains = results.map(({ observations: _observations, ...result }) => ({
       ...result,

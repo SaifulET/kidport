@@ -3,10 +3,16 @@ import { z } from 'zod';
 
 dotenv.config();
 
+const booleanFromEnv = z.preprocess((value) => {
+  if (typeof value !== 'string') return value;
+  return ['1', 'true', 'yes', 'on'].includes(value.toLowerCase());
+}, z.boolean());
+
 const schema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().default(4000),
   MONGODB_URI: z.string().default('mongodb://127.0.0.1:27017/kidport'),
+  MONGODB_MEMORY_SERVER: booleanFromEnv.default(false),
   JWT_ACCESS_SECRET: z.string().min(16).default('development-access-secret-change-me'),
   JWT_REFRESH_SECRET: z.string().min(16).default('development-refresh-secret-change-me'),
   JWT_ACCESS_EXPIRES_IN: z.string().default('15m'),
@@ -23,6 +29,7 @@ const schema = z.object({
   SMTP_FROM: z.string().default('Kidport <no-reply@kidport.local>'),
   OPENAI_API_KEY: z.string().optional(),
   OPENAI_MODEL: z.string().default('gpt-4o-mini'),
+  OPENAI_REQUEST_TIMEOUT_MS: z.coerce.number().int().positive().default(1500),
   FRONTEND_URL: z.string().url().default('http://localhost:3000'),
   MOBILE_DEEP_LINK: z.string().default('kidport://')
 });

@@ -263,9 +263,9 @@ childrenRouter.post('/children/:childId/reports/:reportId/share', requireChildOw
 childrenRouter.get('/children/:childId/expert-guidance', requireChildAccess(), asyncHandler(async (req, res) => {
   const report = await ReportService.developmentReport(req.params.childId);
   ok(res, 'Expert guidance', {
-    disclaimer: report.disclaimer,
-    suggestions: report.ai.positiveHighlights,
-    questionsToDiscuss: report.ai.flagsToDiscuss.map((flag: { title: string }) => flag.title)
+    disclaimer: 'This report is generated from caregiver-submitted observations and AI-assisted analysis. It is not a clinical diagnosis and should not replace professional pediatric evaluation.',
+    suggestions: report.positiveHighlights.items.map((item) => item.text),
+    questionsToDiscuss: report.recommendedQuestions.items.map((item) => item.question)
   });
 }));
 

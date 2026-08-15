@@ -2602,50 +2602,106 @@ Response:
   "success": true,
   "message": "Development report",
   "data": {
-    "childId": "66f...",
-    "child": {
-      "id": "66f...",
-      "fullName": "Ava Smith",
-      "dateOfBirth": "2023-04-12T00:00:00.000Z"
+    "formatVersion": "development-report-v2",
+    "sections": [
+      "hero",
+      "overallSummary",
+      "domainReports",
+      "flagsToDiscuss",
+      "positiveHighlights",
+      "recommendedQuestions",
+      "observationData"
+    ],
+    "hero": {
+      "childId": "66f...",
+      "childName": "Ava Smith",
+      "profileImage": null,
+      "ageLabel": "40 months old",
+      "dateOfBirthLabel": "DOB: April 12, 2023",
+      "reportingPeriodLabel": "Aug 1, 2026 - Aug 10, 2026",
+      "caregiversLabel": "3 Caregivers",
+      "observationsLabel": "20 Observations",
+      "overallScore": {
+        "value": 72.5,
+        "label": "72.5/100"
+      },
+      "generatedAtLabel": "Generated August 10, 2026",
+      "poweredByAI": true
     },
-    "overallScore": 72.5,
-    "progress": [
+    "overallSummary": {
+      "title": "Overall Summary",
+      "rangeLabel": "August 1, 2026 - August 10, 2026",
+      "text": "AI summary text"
+    },
+    "domainReports": [
       {
         "domainId": "66f...",
-        "name": "Language & Literacy",
-        "percentage": 75,
-        "stage": "steady",
-        "observationCount": 12
+        "domain": "Language & Literacy",
+        "icon": "message-circle",
+        "score": 75,
+        "scoreLabel": "75/100",
+        "status": "stable",
+        "statusLabel": "Stable",
+        "summary": "Domain summary text",
+        "observationCount": 12,
+        "tone": "success"
       }
     ],
-    "reportingPeriod": {
-      "startDate": "2026-08-01T00:00:00.000Z",
-      "endDate": "2026-08-10T00:00:00.000Z"
+    "flagsToDiscuss": {
+      "count": 2,
+      "countLabel": "2 items",
+      "items": [
+        {
+          "domain": "Language",
+          "priority": "medium",
+          "priorityLabel": "MEDIUM PRIORITY",
+          "tone": "warning",
+          "title": "Expressive Vocabulary Below Typical Range",
+          "description": "Flag description",
+          "recommendation": "Recommended next step"
+        }
+      ]
     },
-    "totalObservations": 20,
-    "caregiversContributing": 3,
-    "contributors": [
-      {
-        "userId": "66f...",
-        "name": "Jane Parent",
-        "role": "mother",
-        "observationCount": 8
-      }
-    ],
-    "averageObservationsPerWeek": 14,
-    "dataQuality": {
-      "score": 80,
-      "label": "excellent"
+    "positiveHighlights": {
+      "items": [
+        {
+          "icon": "heart",
+          "text": "Positive highlight text"
+        }
+      ]
     },
-    "ai": {
-      "overallSummary": "AI summary text",
-      "domainSummaries": [],
-      "flagsToDiscuss": [],
-      "positiveHighlights": [],
-      "dataQualityExplanation": "..."
+    "recommendedQuestions": {
+      "items": [
+        {
+          "number": 1,
+          "question": "What should we do next for expressive vocabulary below typical range in Language?",
+          "sourceDomain": "Language"
+        }
+      ]
     },
-    "disclaimer": "This report is generated from caregiver-submitted observations and AI-assisted analysis. It is not a clinical diagnosis and should not replace professional pediatric evaluation.",
-    "generatedAt": "2026-08-10T00:00:00.000Z"
+    "observationData": {
+      "totalObservations": 20,
+      "reportingPeriod": "August 1, 2026 - August 10, 2026",
+      "caregiversContributing": 3,
+      "averageObservationsPerWeek": 14,
+      "dataQuality": {
+        "score": 80,
+        "label": "excellent",
+        "displayLabel": "Excellent",
+        "explanation": "Data quality explanation"
+      },
+      "framework": "CDC Learn the Signs. Act Early. - 3-4 year milestones",
+      "aiEngine": "gpt-4o-mini",
+      "contributingCaregivers": [
+        {
+          "userId": "66f...",
+          "name": "Jane Parent",
+          "role": "mother",
+          "observationCount": 8,
+          "badgeLabel": "Jane Parent (Mother)"
+        }
+      ]
+    }
   }
 }
 ```
@@ -2655,6 +2711,7 @@ Notes:
 - Numeric scores are deterministic backend calculations.
 - AI generates qualitative narrative only.
 - Cached report analysis is reused when the source observation set has not changed.
+- The response contains only screen-ready report sections.
 
 ### GET `/children/:childId/reports/development/pdf`
 
@@ -2773,6 +2830,79 @@ Response:
 
 ## Support and Feature Requests
 
+### GET `/support/messages`
+
+Auth: required
+
+Returns the authenticated user's support chat thread.
+
+Response:
+
+```json
+{
+  "success": true,
+  "message": "Support messages",
+  "data": {
+    "thread": {
+      "id": "support-66f...",
+      "title": "Support Team",
+      "subtitle": "Usually replies within minutes"
+    },
+    "messages": [
+      {
+        "id": "66f...",
+        "sender": "support",
+        "text": "Hi Sarah! I'm Maya from KidPort support. How can I help you today?",
+        "sentAt": "2026-08-15T10:30:00.000Z",
+        "status": "sent"
+      }
+    ]
+  }
+}
+```
+
+### POST `/support/messages`
+
+Auth: required
+
+Request body:
+
+```json
+{
+  "text": "I have an issue with uploading an observation."
+}
+```
+
+Response:
+
+```json
+{
+  "success": true,
+  "message": "Support message sent",
+  "data": {
+    "thread": {
+      "id": "support-66f...",
+      "title": "Support Team",
+      "subtitle": "Usually replies within minutes"
+    },
+    "sentMessage": {
+      "id": "66f...",
+      "sender": "user",
+      "text": "I have an issue with uploading an observation.",
+      "sentAt": "2026-08-15T09:58:00.000Z",
+      "status": "sent"
+    },
+    "autoReply": {
+      "id": "66f...",
+      "sender": "support",
+      "text": "Thanks for reaching out! Let me help you with that. Could you provide more details?",
+      "sentAt": "2026-08-15T09:58:01.000Z",
+      "status": "sent"
+    }
+  }
+}
+```
+
 ### POST `/support/issues`
 
 Auth: required
@@ -2783,7 +2913,6 @@ Request fields:
 
 ```json
 {
-  "issueType": "bug_error",
   "title": "Upload failed",
   "description": "Photo observation upload failed on retry.",
   "urgency": "medium"
@@ -2796,8 +2925,6 @@ Multipart attachment field:
 attachments: optional files
 ```
 
-`issueType`: `bug_error`, `app_crash`, `performance`, `other`
-
 `urgency`: `low`, `medium`, `high`
 
 Response:
@@ -2809,7 +2936,6 @@ Response:
   "data": {
     "_id": "66f...",
     "userId": "66f...",
-    "issueType": "bug_error",
     "title": "Upload failed",
     "urgency": "medium",
     "attachments": [],
@@ -2828,7 +2954,6 @@ Request fields:
 
 ```json
 {
-  "type": "new_feature",
   "title": "Weekly printable summary",
   "description": "Allow parents to export weekly summaries.",
   "impact": "important"
@@ -2841,8 +2966,6 @@ Multipart image field:
 images: optional image files
 ```
 
-`type`: `new_feature`, `improvement`, `design_ui`, `integration`
-
 `impact`: `nice_to_have`, `important`, `game_changer`
 
 Response:
@@ -2854,7 +2977,6 @@ Response:
   "data": {
     "_id": "66f...",
     "userId": "66f...",
-    "type": "new_feature",
     "title": "Weekly printable summary",
     "impact": "important",
     "images": [],

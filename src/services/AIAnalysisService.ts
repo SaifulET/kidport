@@ -78,34 +78,77 @@ export class AIAnalysisService {
     return new OpenAI({ apiKey: env.OPENAI_API_KEY });
   }
 
+  private static requestOptions() {
+    return { timeout: env.OPENAI_REQUEST_TIMEOUT_MS, maxRetries: 0 };
+  }
+
+  private static logAIError(context: string, error: unknown) {
+    if (error instanceof Error && error.name === 'APIConnectionTimeoutError') {
+      console.warn(`${context} timed out after ${env.OPENAI_REQUEST_TIMEOUT_MS}ms; using fallback.`);
+      return;
+    }
+    console.error(context, error);
+  }
+
   static disclaimer =
     'This report is generated from caregiver-submitted observations and AI-assisted analysis. It is not a clinical diagnosis and should not replace professional pediatric evaluation.';
+
+  private static fallbackReportNarrative(reason: string) {
+    return {
+      overallSummary: reason,
+      domainSummaries: [],
+      flagsToDiscuss: [],
+      positiveHighlights: [],
+      dataQualityExplanation: 'Data quality is calculated deterministically by the backend.'
+    };
+  }
 
   static async generateReportNarrative(input: unknown) {
     const client = this.client();
     if (!client) {
-      return {
-        overallSummary: 'AI summary is unavailable until OPENAI_API_KEY is configured.',
-        domainSummaries: [],
-        flagsToDiscuss: [],
-        positiveHighlights: [],
-        dataQualityExplanation: 'Data quality is calculated deterministically by the backend.'
-      };
+      return this.fallbackReportNarrative('AI summary is unavailable until OPENAI_API_KEY is configured.');
     }
 
-    const response = await client.chat.completions.create({
-      model: env.OPENAI_MODEL,
-      response_format: { type: 'json_object' },
-      messages: [
-        {
-          role: 'system',
-          content:
-            'You provide child-development guidance only. Never diagnose autism, ADHD, disorders, disease, or medical conditions. Return valid JSON matching the requested fields.'
-        },
-        { role: 'user', content: JSON.stringify({ input, disclaimer: this.disclaimer }) }
-      ]
-    });
-    return reportSchema.parse(JSON.parse(response.choices[0]?.message.content ?? '{}'));
+    try {
+      const response = await client.chat.completions.create({
+        model: env.OPENAI_MODEL,
+        response_format: { type: 'json_object' },
+        messages: [
+          {
+            role: 'system',
+            content:
+              'You provide child-development guidance only. Never diagnose autism, ADHD, disorders, disease, or medical conditions. Return valid JSON only.'
+          },
+          {
+            role: 'user',
+            content: JSON.stringify({
+              task: 'Generate a development report narrative from the supplied backend scores.',
+              requiredJsonShape: {
+                overallSummary: 'string',
+                domainSummaries: [{ domain: 'string', summary: 'string' }],
+                flagsToDiscuss: [
+                  {
+                    domain: 'string',
+                    priority: 'low | medium | high',
+                    title: 'string',
+                    description: 'string',
+                    recommendation: 'string'
+                  }
+                ],
+                positiveHighlights: ['string'],
+                dataQualityExplanation: 'string'
+              },
+              input,
+              disclaimer: this.disclaimer
+            })
+          }
+        ]
+      }, this.requestOptions());
+      return reportSchema.parse(JSON.parse(response.choices[0]?.message.content ?? '{}'));
+    } catch (error) {
+      this.logAIError('Failed to generate report narrative', error);
+      return this.fallbackReportNarrative('AI summary is temporarily unavailable. The deterministic report data is still available.');
+    }
   }
 
   static async generateObservationTextFromMedia(files: Express.Multer.File[]) {
@@ -162,12 +205,12 @@ export class AIAnalysisService {
             })
           }
         ]
-      });
+      }, this.requestOptions());
 
       const parsed = observationDisplaySchema.parse(JSON.parse(response.choices[0]?.message.content ?? '{}'));
       return parsed;
     } catch (error) {
-      console.error('Failed to generate observation display fields', error);
+      this.logAIError('Failed to generate observation display fields', error);
       return fallback;
     }
   }
@@ -231,13 +274,13 @@ export class AIAnalysisService {
             })
           }
         ]
-      });
+      }, this.requestOptions());
 
       const parsed = domainProgressKeywordsSchema.parse(JSON.parse(response.choices[0]?.message.content ?? '{}'));
       const byDomain = new Map(parsed.domains.map((item) => [item.domainId, item.keyword]));
       return fallback.map((item) => ({ ...item, keyword: byDomain.get(item.domainId) ?? item.keyword }));
     } catch (error) {
-      console.error('Failed to generate domain progress keywords', error);
+      this.logAIError('Failed to generate domain progress keywords', error);
       return fallback;
     }
   }
@@ -261,11 +304,11 @@ export class AIAnalysisService {
             content: JSON.stringify(input)
           }
         ]
-      });
+      }, this.requestOptions());
 
       return observationStatusSummarySchema.parse(JSON.parse(response.choices[0]?.message.content ?? '{}'));
     } catch (error) {
-      console.error('Failed to generate observation status summary', error);
+      this.logAIError('Failed to generate observation status summary', error);
       return input.fallback;
     }
   }
@@ -303,16 +346,19 @@ export class AIAnalysisService {
           ]
         }
       ]
-    });
+    }, this.requestOptions());
     return response.choices[0]?.message.content?.trim() || null;
   }
 
   private static async transcribeAudio(client: OpenAI, file: Express.Multer.File) {
     const upload = await toFile(file.buffer, file.originalname, { type: file.mimetype });
-    const transcription = await client.audio.transcriptions.create({
-      file: upload,
-      model: 'gpt-4o-mini-transcribe'
-    });
+    const transcription = await client.audio.transcriptions.create(
+      {
+        file: upload,
+        model: 'gpt-4o-mini-transcribe'
+      },
+      this.requestOptions()
+    );
     return transcription.text.trim() || null;
   }
 }

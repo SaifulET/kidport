@@ -1,5 +1,6 @@
-import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import type { Readable } from 'stream';
 import { env } from '../config/env';
 import { AppError } from '../utils/AppError';
 
@@ -32,6 +33,24 @@ export class StorageService {
     const key = `${prefix}/${Date.now()}-${file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
     await s3.send(new PutObjectCommand({ Bucket: bucket, Key: key, Body: file.buffer, ContentType: file.mimetype }));
     return { key, url: this.publicUrl(key), mimeType: file.mimetype, size: file.size, originalName: file.originalname };
+  }
+
+  static async downloadBuffer(key: string): Promise<Buffer> {
+    const bucket = this.requireBucket();
+    const response = await s3.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
+    if (!response.Body) throw new AppError('Stored media could not be read', 502);
+
+    if ('transformToByteArray' in response.Body && typeof response.Body.transformToByteArray === 'function') {
+      return Buffer.from(await response.Body.transformToByteArray());
+    }
+
+    return new Promise((resolve, reject) => {
+      const chunks: Buffer[] = [];
+      const stream = response.Body as Readable;
+      stream.on('data', (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
+      stream.on('error', reject);
+      stream.on('end', () => resolve(Buffer.concat(chunks)));
+    });
   }
 
   static async presignedPutUrl(key: string, contentType: string) {

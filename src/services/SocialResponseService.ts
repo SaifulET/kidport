@@ -62,6 +62,21 @@ const timeAgo = (value?: Date | string | null) => {
 
 const objectId = (value: unknown) => new Types.ObjectId(String(value));
 
+const observationProcessingStatus = (value: unknown) => {
+  if (!value || typeof value !== 'object') return null;
+  const metadata = value as { observationProcessing?: { status?: unknown; queuedAt?: unknown; startedAt?: unknown; completedAt?: unknown; failedAt?: unknown } };
+  const processing = metadata.observationProcessing;
+  if (!processing || typeof processing.status !== 'string') return null;
+
+  return {
+    status: processing.status,
+    queuedAt: processing.queuedAt ?? null,
+    startedAt: processing.startedAt ?? null,
+    completedAt: processing.completedAt ?? null,
+    failedAt: processing.failedAt ?? null
+  };
+};
+
 export class SocialResponseService {
   static author(user: unknown) {
     if (!user || typeof user !== 'object' || !('fullName' in user)) return null;
@@ -110,6 +125,7 @@ export class SocialResponseService {
       description: data.description ?? null,
       progress: data.progress ?? null,
       icon: data.icon ?? null,
+      aiProcessing: observationProcessingStatus(data.aiMetadata),
       milestone: isMilestone
         ? {
             detected: true,

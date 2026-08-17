@@ -1777,9 +1777,9 @@ media: one or more image, audio, or video files
 
 When `type` is omitted, the backend infers it from `media`; if no media is uploaded, it uses `text`.
 
-If a caregiver uploads an image, audio, or video without observation text, the backend saves the media to S3 and generates the observation text from that media. Images are converted to a short visible-behavior observation. Audio and video are transcribed. This requires `OPENAI_API_KEY`; if AI conversion is unavailable, the backend stores a fallback media-upload note as the observation text.
+If a caregiver uploads an image, audio, or video, the backend saves the media to S3 before responding. Media AI processing then runs in the background so large media does not hold the HTTP request open. When no observation text is supplied, the response initially uses a fallback media-upload note and later updates the observation text from the saved media. Images are converted to a short visible-behavior observation. Audio and video are transcribed. This requires `OPENAI_API_KEY`; if AI conversion is unavailable, the backend keeps the fallback media-upload note.
 
-For every observation type, including plain text, the backend also generates/refines card display fields: `title`, `description`, `progress`, and emoji-style `icon` such as `\uD83C\uDFE0` or `\uD83D\uDCAC`.
+For plain text observations, the backend generates/refines card display fields before responding: `title`, `description`, `progress`, and emoji-style `icon` such as `\uD83C\uDFE0` or `\uD83D\uDCAC`. For media observations, the response includes fallback display fields immediately and updates them in the background after media processing finishes. Clients can poll `GET /observations/:observationId` and inspect `aiProcessing.status`.
 
 Optional fields: `type`, `text`, `stage`, `indicatorId`, `mood`, `occurredAt`, `reaction`.
 
@@ -1805,6 +1805,13 @@ Response:
     "description": "Ava identified three colors accurately during play.",
     "progress": 75,
     "icon": "\uD83C\uDFA8",
+    "aiProcessing": {
+      "status": "completed",
+      "queuedAt": "2026-08-17T16:00:00.000Z",
+      "startedAt": "2026-08-17T16:00:01.000Z",
+      "completedAt": "2026-08-17T16:00:04.000Z",
+      "failedAt": null
+    },
     "milestone": {
       "detected": true,
       "title": "AI Milestone Detected",

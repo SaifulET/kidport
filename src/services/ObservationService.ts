@@ -28,6 +28,17 @@ export type CreateObservationInput = {
   files?: Express.Multer.File[];
 };
 
+type MediaProcessingJob = {
+  observationId: string;
+  childId: string;
+  providedText?: string;
+  media: StoredMedia[];
+  domainName?: string;
+  indicatorTitle?: string;
+  stage?: DevelopmentStage;
+  stageScore?: number;
+};
+
 export class ObservationService {
   static isMilestoneStage(stage?: DevelopmentStage) {
     return stage === 'confident';
@@ -62,6 +73,75 @@ export class ObservationService {
     }
   }
 
+  private static mediaFallbackText(media: StoredMedia[]) {
+    return `Media observation uploaded: ${media.map((file) => file.originalName ?? file.key.split('/').pop() ?? 'media').join(', ')}`;
+  }
+
+  private static queueMediaProcessing(job: MediaProcessingJob) {
+    setImmediate(() => {
+      void this.processMediaObservation(job).catch((error) => {
+        console.error('Failed to process media observation', error);
+      });
+    });
+  }
+
+  private static async processMediaObservation(job: MediaProcessingJob) {
+    try {
+      await Observation.updateOne(
+        { _id: job.observationId },
+        {
+          $set: {
+            'aiMetadata.observationProcessing.status': 'processing',
+            'aiMetadata.observationProcessing.startedAt': new Date()
+          }
+        }
+      );
+
+      const generatedText = job.providedText ? null : await AIAnalysisService.generateObservationTextFromStoredMedia(job.media);
+      const text = job.providedText || generatedText || this.mediaFallbackText(job.media);
+      const display = await AIAnalysisService.generateObservationDisplay({
+        text,
+        domain: job.domainName,
+        indicatorTitle: job.indicatorTitle,
+        stage: job.stage,
+        stageScore: job.stageScore
+      });
+
+      await Observation.updateOne(
+        { _id: job.observationId },
+        {
+          $set: {
+            text,
+            title: display.title,
+            description: display.description,
+            progress: display.progress,
+            icon: display.icon,
+            'aiMetadata.observationProcessing.status': 'completed',
+            'aiMetadata.observationProcessing.completedAt': new Date(),
+            'aiMetadata.observationProcessing.mediaTextGenerated': Boolean(generatedText),
+            'aiMetadata.observationProcessing.mediaCount': job.media.length
+          }
+        }
+      );
+
+      void DevelopmentScoringService.refreshChildDevelopmentSnapshot(job.childId).catch((error) => {
+        console.error('Failed to refresh child development snapshot after media processing', error);
+      });
+    } catch (error) {
+      await Observation.updateOne(
+        { _id: job.observationId },
+        {
+          $set: {
+            'aiMetadata.observationProcessing.status': 'failed',
+            'aiMetadata.observationProcessing.failedAt': new Date(),
+            'aiMetadata.observationProcessing.error': error instanceof Error ? error.message : 'Unknown media processing error'
+          }
+        }
+      );
+      throw error;
+    }
+  }
+
   static async create(input: CreateObservationInput) {
     const domainId = await this.resolveDomainId(input.domainId);
     await this.validateDomainIndicator(domainId, input.indicatorId);
@@ -73,7 +153,6 @@ export class ObservationService {
     if (!child) throw new AppError('Child not found', 404);
 
     let media: StoredMedia[] = [];
-    let generatedText: string | null = null;
     if (input.files?.length) {
       const folder =
         input.type === 'voice'
@@ -83,25 +162,24 @@ export class ObservationService {
             : input.type === 'photo'
               ? 'images'
               : 'files';
-      const uploadPromise = Promise.all(input.files.map((file) => StorageService.uploadBuffer(`children/${input.childId}/observations/${folder}`, file)));
-      const generatedTextPromise = !input.text?.trim() ? AIAnalysisService.generateObservationTextFromMedia(input.files) : Promise.resolve(null);
-      [media, generatedText] = await Promise.all([uploadPromise, generatedTextPromise]);
+      media = await Promise.all(input.files.map((file) => StorageService.uploadBuffer(`children/${input.childId}/observations/${folder}`, file)));
     }
 
-    const text =
-      input.text?.trim() ||
-      generatedText ||
-      (input.files?.length ? `Media observation uploaded: ${input.files.map((file) => file.originalname).join(', ')}` : undefined);
+    const providedText = input.text?.trim();
+    const stageScore = input.stage ? DEVELOPMENT_STAGE_SCORE[input.stage] : undefined;
+    const text = providedText || (media.length ? this.mediaFallbackText(media) : undefined);
 
-    const display = await AIAnalysisService.generateObservationDisplay({
+    const displayInput = {
       text,
       domain: domain?.name,
       indicatorTitle: indicator?.title,
       stage: input.stage,
-      stageScore: input.stage ? DEVELOPMENT_STAGE_SCORE[input.stage] : undefined
-    });
+      stageScore
+    };
+    const display = media.length
+      ? AIAnalysisService.fallbackObservationDisplay(displayInput)
+      : await AIAnalysisService.generateObservationDisplay(displayInput);
 
-    const stageScore = input.stage ? DEVELOPMENT_STAGE_SCORE[input.stage] : undefined;
     const isMilestone = this.isMilestoneStage(input.stage);
     const observation = await Observation.create({
       childId: input.childId,
@@ -122,7 +200,16 @@ export class ObservationService {
       stageScore,
       mood: input.mood,
       occurredAt: input.occurredAt ?? new Date(),
-      isMilestone
+      isMilestone,
+      aiMetadata: media.length
+        ? {
+            observationProcessing: {
+              status: 'queued',
+              queuedAt: new Date(),
+              mediaCount: media.length
+            }
+          }
+        : undefined
     });
 
     if (isMilestone) {
@@ -131,6 +218,19 @@ export class ObservationService {
       await NotificationService.createMany([...new Set(recipients)], 'milestone_achieved', 'New milestone achieved', `${child.fullName} reached a confident milestone.`, {
         childId: input.childId,
         observationId: observation._id.toString()
+      });
+    }
+
+    if (media.length) {
+      this.queueMediaProcessing({
+        observationId: observation._id.toString(),
+        childId: input.childId,
+        providedText,
+        media,
+        domainName: domain?.name,
+        indicatorTitle: indicator?.title,
+        stage: input.stage,
+        stageScore
       });
     }
 

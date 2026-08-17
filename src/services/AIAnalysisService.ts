@@ -1,6 +1,7 @@
 import OpenAI, { toFile } from 'openai';
 import { z } from 'zod';
 import { env } from '../config/env';
+import { StorageService, type StoredMedia } from './StorageService';
 
 const flagsSchema = z.array(
   z.object({
@@ -122,6 +123,12 @@ type DevelopmentalAgeEstimateInput = {
   }>;
 };
 
+type MediaAnalysisFile = {
+  buffer: Buffer;
+  mimetype: string;
+  originalname: string;
+};
+
 export class AIAnalysisService {
   private static developmentalAgeParts(totalMonths: number) {
     const years = Math.floor(totalMonths / 12);
@@ -223,7 +230,7 @@ export class AIAnalysisService {
     }
   }
 
-  static async generateObservationTextFromMedia(files: Express.Multer.File[]) {
+  static async generateObservationTextFromMedia(files: MediaAnalysisFile[]) {
     const client = this.client();
     if (!client || files.length === 0) return null;
 
@@ -241,6 +248,20 @@ export class AIAnalysisService {
     );
 
     return generated.filter(Boolean).join('\n\n') || null;
+  }
+
+  static async generateObservationTextFromStoredMedia(media: StoredMedia[]) {
+    if (!env.OPENAI_API_KEY || media.length === 0) return null;
+
+    const files = await Promise.all(
+      media.map(async (item) => ({
+        buffer: await StorageService.downloadBuffer(item.key),
+        mimetype: item.mimeType,
+        originalname: item.originalName ?? item.key.split('/').pop() ?? 'media'
+      }))
+    );
+
+    return this.generateObservationTextFromMedia(files);
   }
 
   static fallbackObservationDisplay(input: { text?: string; domain?: string; indicatorTitle?: string; stage?: string; stageScore?: number }) {
@@ -498,7 +519,7 @@ export class AIAnalysisService {
     return '⭐';
   }
 
-  private static async describeImage(client: OpenAI, file: Express.Multer.File) {
+  private static async describeImage(client: OpenAI, file: MediaAnalysisFile) {
     const response = await client.chat.completions.create({
       model: env.OPENAI_MODEL,
       messages: [
@@ -519,7 +540,7 @@ export class AIAnalysisService {
     return response.choices[0]?.message.content?.trim() || null;
   }
 
-  private static async transcribeAudio(client: OpenAI, file: Express.Multer.File) {
+  private static async transcribeAudio(client: OpenAI, file: MediaAnalysisFile) {
     const upload = await toFile(file.buffer, file.originalname, { type: file.mimetype });
     const transcription = await client.audio.transcriptions.create(
       {

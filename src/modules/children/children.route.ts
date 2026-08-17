@@ -155,6 +155,7 @@ childrenRouter.patch(
   requireChildOwner(),
   validate(updateChildSchema),
   asyncHandler(async (req, res) => {
+    console.log('Received request to update child:', req.params.childId, 'with body:', req.body);
     const payload = Object.fromEntries(Object.entries(childPayload(req.body)).filter(([, value]) => value !== undefined));
     console.log('Updating child with payload:', payload);
     const child = await Child.findByIdAndUpdate(req.params.childId, { $set: payload }, { new: true });

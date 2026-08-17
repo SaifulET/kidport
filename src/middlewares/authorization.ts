@@ -12,6 +12,7 @@ export const requireChildAccess = (paramName = 'childId') => async (req: Request
 };
 
 export const requireChildOwner = (paramName = 'childId') => async (req: Request, _res: Response, next: NextFunction) => {
+  console.log('Checking child owner access for user:', req.user?._id, 'and childId:', req.params[paramName]);
   if (!req.user) return next(new AppError('Authentication required', 401));
   const childId = req.params[paramName];
   const access = await AuthorizationService.getChildAccess(req.user._id.toString(), childId);

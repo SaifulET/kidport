@@ -7,7 +7,7 @@ import { TokenService } from '../../services/TokenService';
 import { AppError } from '../../utils/AppError';
 import { asyncHandler } from '../../utils/asyncHandler';
 import { ok } from '../../utils/apiResponse';
-import { randomToken, hashToken } from '../../utils/crypto';
+import { randomOtp, hashToken } from '../../utils/crypto';
 import { requireAuth } from '../../middlewares/auth';
 import { validate } from '../../middlewares/validate';
 import { registerSchema, loginSchema, refreshSchema } from './auth.validation';
@@ -19,6 +19,13 @@ const identityToAccount = (identity: string) =>
   identity === 'daycare'
     ? { userType: 'daycare' as const, daycareRole: 'daycare_admin' as const }
     : { userType: 'caregiver' as const, caregiverRole: identity as 'mother' | 'father' | 'parent' | 'nanny' };
+
+const passwordResetOtpSchema = z.object({
+  body: z.object({
+    email: z.string().email(),
+    otp: z.string().regex(/^\d{4}$/, 'OTP must be 4 digits')
+  })
+});
 
 authRouter.post(
   '/register',
@@ -70,24 +77,49 @@ authRouter.post(
   '/forgot-password',
   validate(z.object({ body: z.object({ email: z.string().email() }) })),
   asyncHandler(async (req, res) => {
-    const user = await User.findOne({ email: req.body.email });
+    const email = req.body.email.toLowerCase().trim();
+    const user = await User.findOne({ email });
     if (user) {
-      const token = randomToken();
-      user.passwordResetTokenHash = hashToken(token);
-      user.passwordResetExpiresAt = new Date(Date.now() + 60 * 60 * 1000);
+      const otp = randomOtp();
+      user.passwordResetTokenHash = hashToken(otp);
+      user.passwordResetExpiresAt = new Date(Date.now() + 10 * 60 * 1000);
       await user.save();
-      await EmailService.sendMail(user.email, 'Reset your Kidport password', `<p>Use this reset token: ${token}</p>`);
+      await EmailService.sendMail(
+        user.email,
+        'Your Kidport password reset OTP',
+        `<p>Your Kidport password reset OTP is <strong>${otp}</strong>.</p><p>This code expires in 10 minutes.</p>`
+      );
     }
-    ok(res, 'If the email exists, password reset instructions have been sent');
+    ok(res, 'If the email exists, a password reset OTP has been sent');
+  })
+);
+
+authRouter.post(
+  '/verify-reset-otp',
+  validate(passwordResetOtpSchema),
+  asyncHandler(async (req, res) => {
+    const email = req.body.email.toLowerCase().trim();
+    const user = await User.findOne({
+      email,
+      passwordResetTokenHash: hashToken(req.body.otp),
+      passwordResetExpiresAt: { $gt: new Date() }
+    });
+    if (!user) throw new AppError('Invalid or expired OTP', 400);
+    ok(res, 'OTP verified');
   })
 );
 
 authRouter.post(
   '/reset-password',
-  validate(z.object({ body: z.object({ token: z.string(), password: z.string().min(8) }) })),
+  validate(passwordResetOtpSchema.extend({ body: passwordResetOtpSchema.shape.body.extend({ password: z.string().min(8) }) })),
   asyncHandler(async (req, res) => {
-    const user = await User.findOne({ passwordResetTokenHash: hashToken(req.body.token), passwordResetExpiresAt: { $gt: new Date() } });
-    if (!user) throw new AppError('Invalid or expired reset token', 400);
+    const email = req.body.email.toLowerCase().trim();
+    const user = await User.findOne({
+      email,
+      passwordResetTokenHash: hashToken(req.body.otp),
+      passwordResetExpiresAt: { $gt: new Date() }
+    });
+    if (!user) throw new AppError('Invalid or expired OTP', 400);
     user.passwordHash = await bcrypt.hash(req.body.password, 12);
     user.passwordResetTokenHash = undefined;
     user.passwordResetExpiresAt = undefined;

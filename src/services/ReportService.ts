@@ -6,6 +6,7 @@ import { Report } from '../modules/reports/report.model';
 import { User } from '../modules/users/user.model';
 import { AppError } from '../utils/AppError';
 import { calculateAge, weeksBetweenInclusiveFloor } from '../utils/date';
+import { developmentalAgeDisplay, type DevelopmentalAgeDisplay } from '../utils/developmentalAge';
 import { AIAnalysisService } from './AIAnalysisService';
 import { DevelopmentScoringService } from './DevelopmentScoringService';
 
@@ -43,10 +44,29 @@ type ReportAI = {
   dataQualityExplanation: string;
 };
 
+type DevelopmentalAgeEstimate = {
+  months: number | null;
+  years?: number;
+  remainingMonths?: number;
+  days?: number;
+  label: string;
+  confidence: 'low' | 'medium' | 'high';
+  basis: string;
+  domainMatches?: Array<{
+    domainId: string;
+    name: string;
+    estimatedMonths: number | null;
+    note?: string;
+  }>;
+  calculatedAt?: Date;
+  model?: string;
+} | null;
+
 type DevelopmentReportRaw = {
   childId: string;
   child: { id: string; fullName: string; dateOfBirth: Date; profileImage?: string | null };
   overallScore: number | null;
+  developmentalAge?: DevelopmentalAgeEstimate;
   progress: ReportDomain[];
   reportingPeriod: { startDate: Date | null; endDate: Date | null };
   totalObservations: number;
@@ -72,6 +92,7 @@ type DevelopmentReportResponse = {
     caregiversLabel: string;
     observationsLabel: string;
     overallScore: { value: number | null; label: string };
+    developmentalAge: DevelopmentalAgeDisplay;
     generatedAtLabel: string;
     poweredByAI: boolean;
   };
@@ -221,7 +242,10 @@ export class ReportService {
       return {
         formatVersion: report.formatVersion,
         sections: report.sections,
-        hero: report.hero,
+        hero: {
+          ...report.hero,
+          developmentalAge: developmentalAgeDisplay(report.hero.developmentalAge)
+        },
         overallSummary: report.overallSummary,
         domainReports: report.domainReports,
         flagsToDiscuss: report.flagsToDiscuss,
@@ -255,6 +279,7 @@ export class ReportService {
           value: raw.overallScore,
           label: raw.overallScore === null ? 'Not enough data' : `${raw.overallScore}/100`
         },
+        developmentalAge: developmentalAgeDisplay(raw.developmentalAge),
         generatedAtLabel: `Generated ${formatDate(raw.generatedAt)}`,
         poweredByAI: Boolean(process.env.OPENAI_API_KEY)
       },
@@ -351,6 +376,7 @@ export class ReportService {
 
     const progress = await DevelopmentScoringService.calculateChildProgress(childId, range, { useAIKeywords: false });
     const overallScore = DevelopmentScoringService.calculateOverallScore(progress.domains);
+    const developmentalAge = await DevelopmentScoringService.calculateDevelopmentalAge(childId, progress.domains);
     const first = observations[0];
     const last = observations[observations.length - 1];
     const startDate = range.startDate ?? first?.occurredAt ?? null;
@@ -388,6 +414,7 @@ export class ReportService {
         profileImage: typeof profilePhoto === 'string' ? profilePhoto : profilePhoto?.url ?? null
       },
       overallScore,
+      developmentalAge,
       progress: progress.domains,
       reportingPeriod: { startDate, endDate },
       totalObservations: observations.length,
@@ -422,6 +449,7 @@ export class ReportService {
     doc.fontSize(20).text('Kidport Development Report');
     doc.moveDown().fontSize(12).text(`Child: ${report.hero.childName}`);
     doc.text(`Overall score: ${report.hero.overallScore.label}`);
+    doc.text(`Developmental age: ${report.hero.developmentalAge?.label ?? 'Not enough data'}`);
     doc.text(`Total observations: ${report.observationData.totalObservations}`);
     doc.moveDown().text(AIAnalysisService.disclaimer);
     doc.moveDown().text(report.overallSummary.text);

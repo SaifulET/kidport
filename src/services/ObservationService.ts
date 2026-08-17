@@ -12,6 +12,7 @@ import { Observation } from '../modules/observations/observation.model';
 import { NotificationService } from './NotificationService';
 import { StorageService, type StoredMedia } from './StorageService';
 import { AIAnalysisService } from './AIAnalysisService';
+import { DevelopmentScoringService } from './DevelopmentScoringService';
 import { AppError } from '../utils/AppError';
 
 export type CreateObservationInput = {
@@ -132,6 +133,10 @@ export class ObservationService {
         observationId: observation._id.toString()
       });
     }
+
+    void DevelopmentScoringService.refreshChildDevelopmentSnapshot(input.childId).catch((error) => {
+      console.error('Failed to refresh child development snapshot', error);
+    });
 
     return observation;
   }

@@ -10,6 +10,44 @@ const measurementSchema = new Schema(
   { _id: false }
 );
 
+const domainProgressSchema = new Schema(
+  {
+    domainId: { type: Schema.Types.ObjectId, ref: 'DevelopmentDomain' },
+    name: String,
+    percentage: Number,
+    stage: { type: String, enum: ['emerging', 'building', 'steady', 'confident', 'not_enough_data'] },
+    observationCount: { type: Number, default: 0 },
+    keyword: { type: String, enum: ['improving', 'stable', 'needs-support', 'not-enough-data'] }
+  },
+  { _id: false }
+);
+
+const developmentalAgeDomainMatchSchema = new Schema(
+  {
+    domainId: String,
+    name: String,
+    estimatedMonths: Number,
+    note: String
+  },
+  { _id: false }
+);
+
+const developmentalAgeSchema = new Schema(
+  {
+    months: Number,
+    years: Number,
+    remainingMonths: Number,
+    days: Number,
+    label: String,
+    confidence: { type: String, enum: ['low', 'medium', 'high'], default: 'low' },
+    basis: String,
+    domainMatches: [developmentalAgeDomainMatchSchema],
+    calculatedAt: Date,
+    model: String
+  },
+  { _id: false }
+);
+
 const childSchema = new Schema(
   {
     profilePhoto: mediaSchema,
@@ -24,6 +62,10 @@ const childSchema = new Schema(
     caregivers: [{ type: Schema.Types.ObjectId, ref: 'User' }],
     daycare: { type: Schema.Types.ObjectId, ref: 'Daycare' },
     classroom: { type: Schema.Types.ObjectId, ref: 'Classroom' },
+    developmentProgress: [domainProgressSchema],
+    developmentOverallScore: Number,
+    developmentalAge: developmentalAgeSchema,
+    developmentLastCalculatedAt: Date,
     status: { type: String, enum: ['active', 'archived', 'deleted'], default: 'active', index: true },
     deletedAt: Date
   },

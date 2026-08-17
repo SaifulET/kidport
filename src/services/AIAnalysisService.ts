@@ -42,6 +42,26 @@ const observationStatusSummarySchema = z.object({
   upcoming: z.number().int().min(0)
 });
 
+const developmentalAgeEstimateSchema = z.object({
+  months: z.number().int().min(0).max(120).nullable(),
+  years: z.number().int().min(0).max(10).optional(),
+  remainingMonths: z.number().int().min(0).max(11).optional(),
+  days: z.number().int().min(0).max(31).optional(),
+  label: z.string().min(1).max(80),
+  confidence: z.enum(['low', 'medium', 'high']),
+  basis: z.string().min(1).max(300),
+  domainMatches: z
+    .array(
+      z.object({
+        domainId: z.string(),
+        name: z.string(),
+        estimatedMonths: z.number().int().min(0).max(120).nullable(),
+        note: z.string().max(160).optional()
+      })
+    )
+    .default([])
+});
+
 type DomainKeywordInput = {
   domainId: string;
   name: string;
@@ -72,7 +92,59 @@ type ObservationStatusSummaryInput = {
   }>;
 };
 
+type DevelopmentalAgeEstimateInput = {
+  chronologicalAgeMonths: number;
+  domains: Array<{
+    domainId: string;
+    name: string;
+    percentage: number | null;
+    stage: string;
+    observationCount: number;
+    keyword: string;
+  }>;
+  ageBands: Array<{
+    id: string;
+    label: string;
+    minMonths: number;
+    maxMonths: number;
+    indicatorCount: number;
+    observedCount: number;
+    averageStageScore: number | null;
+    confidentCount: number;
+  }>;
+  recentObservations: Array<{
+    domain?: string;
+    stage?: string | null;
+    stageScore?: number | null;
+    text?: string | null;
+    title?: string | null;
+    occurredAt?: Date | null;
+  }>;
+};
+
 export class AIAnalysisService {
+  private static developmentalAgeParts(totalMonths: number) {
+    const years = Math.floor(totalMonths / 12);
+    const remainingMonths = totalMonths % 12;
+    const days: number = 0;
+    const yearLabel = `${years} year${years === 1 ? '' : 's'}`;
+    const monthLabel = `${remainingMonths} month${remainingMonths === 1 ? '' : 's'}`;
+    const dayLabel = `${days} day${days === 1 ? '' : 's'}`;
+    return { years, remainingMonths, days, label: `${yearLabel} ${monthLabel} ${dayLabel}` };
+  }
+
+  private static withDevelopmentalAgeParts<T extends { months: number | null; label: string }>(estimate: T) {
+    if (estimate.months === null) return { ...estimate, label: 'Not enough data' };
+    const parts = this.developmentalAgeParts(estimate.months);
+    return {
+      ...estimate,
+      years: parts.years,
+      remainingMonths: parts.remainingMonths,
+      days: parts.days,
+      label: parts.label
+    };
+  }
+
   private static client() {
     if (!env.OPENAI_API_KEY) return null;
     return new OpenAI({ apiKey: env.OPENAI_API_KEY });
@@ -310,6 +382,103 @@ export class AIAnalysisService {
     } catch (error) {
       this.logAIError('Failed to generate observation status summary', error);
       return input.fallback;
+    }
+  }
+
+  static fallbackDevelopmentalAgeEstimate(input: DevelopmentalAgeEstimateInput) {
+    const observedDomains = input.domains.filter((domain) => typeof domain.percentage === 'number');
+    const totalObservations = observedDomains.reduce((sum, domain) => sum + domain.observationCount, 0);
+    if (observedDomains.length === 0 || totalObservations === 0) {
+      return {
+        months: null,
+        label: 'Not enough data',
+        confidence: 'low' as const,
+        basis: 'No scored domain observations are available yet.',
+        domainMatches: input.domains.map((domain) => ({
+          domainId: domain.domainId,
+          name: domain.name,
+          estimatedMonths: null,
+          note: 'No scored observations yet.'
+        }))
+      };
+    }
+
+    const totalWeight = observedDomains.reduce((sum, domain) => sum + Math.max(1, domain.observationCount), 0);
+    const averagePercentage =
+      observedDomains.reduce((sum, domain) => sum + (domain.percentage ?? 0) * Math.max(1, domain.observationCount), 0) / totalWeight;
+    const adjustmentMonths = Math.round(input.chronologicalAgeMonths * ((averagePercentage - 75) / 100));
+    const months = Math.max(1, Math.min(120, input.chronologicalAgeMonths + adjustmentMonths));
+    const adjustmentAmount = Math.abs(adjustmentMonths);
+    const adjustmentLabel = `${adjustmentAmount} month${adjustmentAmount === 1 ? '' : 's'}`;
+    const confidence =
+      observedDomains.length >= 3 && totalObservations >= 8 && input.ageBands.some((band) => band.observedCount >= 3)
+        ? ('high' as const)
+        : observedDomains.length >= 2 && totalObservations >= 4
+          ? ('medium' as const)
+          : ('low' as const);
+
+    return {
+      months,
+      ...this.developmentalAgeParts(months),
+      confidence,
+      basis: `Calculated from chronological age (${input.chronologicalAgeMonths} months) ${adjustmentMonths >= 0 ? 'plus' : 'minus'} ${adjustmentLabel} based on domain progress.`,
+      domainMatches: input.domains.map((domain) => ({
+        domainId: domain.domainId,
+        name: domain.name,
+        estimatedMonths:
+          typeof domain.percentage === 'number'
+            ? Math.max(1, Math.min(120, input.chronologicalAgeMonths + Math.round(input.chronologicalAgeMonths * ((domain.percentage - 75) / 100))))
+            : null,
+        note: `${domain.observationCount} scored observation${domain.observationCount === 1 ? '' : 's'} in this domain.`
+      }))
+    };
+  }
+
+  static async generateDevelopmentalAgeEstimate(input: DevelopmentalAgeEstimateInput) {
+    const fallback = this.fallbackDevelopmentalAgeEstimate(input);
+    const client = this.client();
+    if (!client) return fallback;
+
+    try {
+      const response = await client.chat.completions.create(
+        {
+          model: env.OPENAI_MODEL,
+          response_format: { type: 'json_object' },
+          messages: [
+            {
+              role: 'system',
+              content:
+                'Estimate a child-development skill-equivalent age from caregiver observations and backend domain scores. Return valid JSON only with months, label, confidence, basis, and domainMatches. The months value must be the child chronological age plus or minus a development-progress adjustment; do not replace it with a raw age-band maximum. Use age-band evidence only to support confidence and notes. This is not a diagnosis, clinical assessment, or statement of delay. Be conservative, use null months when data is too limited, and keep the basis concise.'
+            },
+            {
+              role: 'user',
+              content: JSON.stringify({
+                requiredJsonShape: {
+                  months: 'number|null, 0-120',
+                  years: 'number',
+                  remainingMonths: 'number',
+                  days: 'number',
+                  label: 'string in "X years Y months Z days" format',
+                  confidence: 'low|medium|high',
+                  basis: 'string',
+                  domainMatches: [{ domainId: 'string', name: 'string', estimatedMonths: 'number|null', note: 'string' }]
+                },
+                chronologicalAgeMonths: input.chronologicalAgeMonths,
+                domainProgress: input.domains,
+                ageBandEvidence: input.ageBands,
+                recentObservations: input.recentObservations.slice(0, 30),
+                fallback
+              })
+            }
+          ]
+        },
+        this.requestOptions()
+      );
+
+      return this.withDevelopmentalAgeParts(developmentalAgeEstimateSchema.parse(JSON.parse(response.choices[0]?.message.content ?? '{}')));
+    } catch (error) {
+      this.logAIError('Failed to generate developmental age estimate', error);
+      return fallback;
     }
   }
 

@@ -221,7 +221,32 @@ Response:
 ```json
 {
   "success": true,
-  "message": "If the email exists, password reset instructions have been sent",
+  "message": "If the email exists, a password reset OTP has been sent",
+  "data": null
+}
+```
+
+The backend sends a 4-digit OTP to the user's email. The OTP expires after 10 minutes.
+
+### POST `/auth/verify-reset-otp`
+
+Auth: none
+
+Request body:
+
+```json
+{
+  "email": "jane@example.com",
+  "otp": "1234"
+}
+```
+
+Response:
+
+```json
+{
+  "success": true,
+  "message": "OTP verified",
   "data": null
 }
 ```
@@ -234,7 +259,8 @@ Request body:
 
 ```json
 {
-  "token": "reset-token-from-email",
+  "email": "jane@example.com",
+  "otp": "1234",
   "password": "newStrongPassword123"
 }
 ```
@@ -649,6 +675,13 @@ Response:
       "years": 3,
       "months": 3,
       "totalMonths": 39
+    },
+    "developmentalAge": {
+      "months": 38,
+      "years": 3,
+      "remainingMonths": 2,
+      "days": 0,
+      "label": "3 years 2 months 0 days"
     }
   }
 }
@@ -698,7 +731,13 @@ Response:
         "months": 3,
         "totalMonths": 39
       },
-      "developmentalAge": null,
+      "developmentalAge": {
+        "months": 38,
+        "years": 3,
+        "remainingMonths": 2,
+        "days": 0,
+        "label": "3 years 2 months 0 days"
+      },
       "active": true
     }
   ]
@@ -733,7 +772,9 @@ Possible errors: `403`, `404`
 
 Auth: required, child owner required
 
-Request body:
+Content type: `application/json` or `multipart/form-data`
+
+JSON body:
 
 ```json
 {
@@ -747,6 +788,19 @@ Request body:
 }
 ```
 
+Multipart fields:
+
+```text
+photo: optional image/jpeg | image/png | image/webp
+name: Leo Martinez
+nickname: Leo
+dob: 2024-09-02
+gender: Male
+bloodType: O+
+height: 32
+weight: 25
+```
+
 Response:
 
 ```json
@@ -755,7 +809,8 @@ Response:
   "message": "Child updated",
   "data": {
     "_id": "66f...",
-    "nickname": "Avie"
+    "nickname": "Avie",
+    "profileImage": "https://kidport.s3.eu-north-1.amazonaws.com/children/66f.../profile/photo.jpg"
   }
 }
 ```
@@ -777,6 +832,8 @@ Response:
 ### PATCH `/children/:childId/profile-photo`
 
 Auth: required, child owner required
+
+This route is still supported for existing clients. New clients can upload `photo` through `PATCH /children/:childId`.
 
 Content type: `multipart/form-data`
 
@@ -836,7 +893,14 @@ Response:
       "lastCalculatedAt": "2026-08-10T00:00:00.000Z"
     },
     "pediatricReport": {
-      "overallScore": 72.5
+      "overallScore": 72.5,
+      "developmentalAge": {
+        "months": 38,
+        "years": 3,
+        "remainingMonths": 2,
+        "days": 0,
+        "label": "3 years 2 months 0 days"
+      }
     },
     "careCircle": [],
     "recentActivities": []
@@ -2624,6 +2688,13 @@ Response:
       "overallScore": {
         "value": 72.5,
         "label": "72.5/100"
+      },
+      "developmentalAge": {
+        "months": 38,
+        "years": 3,
+        "remainingMonths": 2,
+        "days": 0,
+        "label": "3 years 2 months 0 days"
       },
       "generatedAtLabel": "Generated August 10, 2026",
       "poweredByAI": true

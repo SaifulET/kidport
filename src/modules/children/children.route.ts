@@ -7,6 +7,7 @@ import { validate } from '../../middlewares/validate';
 import { asyncHandler } from '../../utils/asyncHandler';
 import { ok, paginated } from '../../utils/apiResponse';
 import { calculateAge } from '../../utils/date';
+import { developmentalAgeDisplay } from '../../utils/developmentalAge';
 import { randomToken, hashToken } from '../../utils/crypto';
 import { AccessibleChildrenService } from '../../services/AccessibleChildrenService';
 import { DevelopmentScoringService } from '../../services/DevelopmentScoringService';
@@ -27,7 +28,7 @@ childrenRouter.use(requireAuth);
 const childResponse = (child: InstanceType<typeof Child>) => {
   const data = child.toObject();
   const { profilePhoto: _profilePhoto, ...rest } = data;
-  return { ...rest, profileImage: child.profilePhoto?.url, age: calculateAge(child.dateOfBirth) };
+  return { ...rest, profileImage: child.profilePhoto?.url, age: calculateAge(child.dateOfBirth), developmentalAge: developmentalAgeDisplay(child.developmentalAge) };
 };
 
 const measurementSchema = z.union([
@@ -120,7 +121,7 @@ childrenRouter.get(
   '/children/selector',
   asyncHandler(async (req, res) => {
     const ids = await AccessibleChildrenService.idsForUser(req.user!._id.toString());
-    const children = await Child.find({ _id: { $in: ids }, status: { $ne: 'deleted' } }).select('fullName nickname profilePhoto dateOfBirth');
+    const children = await Child.find({ _id: { $in: ids }, status: { $ne: 'deleted' } }).select('fullName nickname profilePhoto dateOfBirth developmentalAge');
     ok(
       res,
       'Child selector',
@@ -129,7 +130,7 @@ childrenRouter.get(
         profileImage: child.profilePhoto?.url,
         name: child.nickname ?? child.fullName,
         age: calculateAge(child.dateOfBirth),
-        developmentalAge: null,
+        developmentalAge: developmentalAgeDisplay(child.developmentalAge),
         active: req.user!.activeChildId?.toString() === child._id.toString()
       }))
     );
@@ -153,10 +154,12 @@ childrenRouter.get('/children/:childId', requireChildAccess(), asyncHandler(asyn
 childrenRouter.patch(
   '/children/:childId',
   requireChildOwner(),
+  upload.single('photo'),
   validate(updateChildSchema),
   asyncHandler(async (req, res) => {
     console.log('Received request to update child:', req.params.childId, 'with body:', req.body);
     const payload = Object.fromEntries(Object.entries(childPayload(req.body)).filter(([, value]) => value !== undefined));
+    if (req.file) payload.profilePhoto = await StorageService.uploadBuffer(`children/${req.params.childId}/profile`, req.file);
     console.log('Updating child with payload:', payload);
     const child = await Child.findByIdAndUpdate(req.params.childId, { $set: payload }, { new: true });
     ok(res, 'Child updated', child ? childResponse(child) : null);
@@ -190,11 +193,14 @@ childrenRouter.get('/children/:childId/dashboard', requireChildAccess(), asyncHa
   ]);
   const activityCounts = await SocialResponseService.observationCountMaps(recentActivities.map((item) => item._id));
   ok(res, 'Dashboard', {
-    child,
+    child: child ? childResponse(child) : null,
     todayInsight: { disclaimer: 'AI insights are guidance only, not a diagnosis.' },
     developmentProgress: progress.domains,
     observationSummary,
-    pediatricReport: { overallScore: DevelopmentScoringService.calculateOverallScore(progress.domains) },
+    pediatricReport: {
+      overallScore: DevelopmentScoringService.calculateOverallScore(progress.domains),
+      developmentalAge: developmentalAgeDisplay(child?.developmentalAge)
+    },
     careCircle,
     recentActivities: SocialResponseService.observations(recentActivities, activityCounts)
   });

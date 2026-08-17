@@ -1,4 +1,5 @@
 import { Types } from 'mongoose';
+import { env } from '../config/env';
 import { DEVELOPMENT_STAGE_SCORE, stageFromPercentage, type DevelopmentStage } from '../constants/stages';
 import { calculateAge } from '../utils/date';
 import { Child } from '../modules/children/child.model';
@@ -88,6 +89,113 @@ export class DevelopmentScoringService {
     }));
 
     return { childId, domains: responseDomains, lastCalculatedAt: new Date() };
+  }
+
+  static async calculateDevelopmentalAge(
+    childId: string,
+    domains?: Array<{
+      domainId: string;
+      name: string;
+      percentage: number | null;
+      stage: string;
+      observationCount: number;
+      keyword: string;
+    }>
+  ) {
+    const child = await Child.findById(childId).select('dateOfBirth');
+    if (!child) throw new AppError('Child not found', 404);
+
+    const progress = domains ?? (await this.calculateChildProgress(childId)).domains;
+    const [ageBands, indicators, observations] = await Promise.all([
+      AgeBand.find({ status: 'active' }).sort({ minMonths: 1 }),
+      DevelopmentIndicator.find({ status: 'active' }).select('domainId ageBandId title'),
+      Observation.find({ childId: new Types.ObjectId(childId), status: 'active' })
+        .select('domainId indicatorId stage stageScore text title occurredAt')
+        .sort({ occurredAt: -1 })
+        .limit(100)
+    ]);
+
+    const indicatorById = new Map(indicators.map((indicator) => [indicator._id.toString(), indicator]));
+    const latestByIndicator = new Map<string, (typeof observations)[number]>();
+    for (const observation of observations) {
+      const indicatorId = observation.indicatorId?.toString();
+      if (indicatorId && !latestByIndicator.has(indicatorId)) latestByIndicator.set(indicatorId, observation);
+    }
+
+    const ageBandEvidence = ageBands.map((band) => {
+      const bandIndicators = indicators.filter((indicator) => indicator.ageBandId.toString() === band._id.toString());
+      const scores = bandIndicators
+        .map((indicator) => latestByIndicator.get(indicator._id.toString()))
+        .map((observation) => observation?.stageScore ?? (observation?.stage ? DEVELOPMENT_STAGE_SCORE[observation.stage] : undefined))
+        .filter((score): score is number => typeof score === 'number');
+      return {
+        id: band._id.toString(),
+        label: band.label,
+        minMonths: band.minMonths,
+        maxMonths: band.maxMonths,
+        indicatorCount: bandIndicators.length,
+        observedCount: scores.length,
+        averageStageScore: scores.length ? Math.round((scores.reduce((sum, score) => sum + score, 0) / scores.length) * 10) / 10 : null,
+        confidentCount: scores.filter((score) => score >= DEVELOPMENT_STAGE_SCORE.confident).length
+      };
+    });
+
+    const domainNameById = new Map(progress.map((domain) => [domain.domainId, domain.name]));
+    const recentObservations = observations.slice(0, 30).map((observation) => {
+      const indicator = observation.indicatorId ? indicatorById.get(observation.indicatorId.toString()) : undefined;
+      const domainId = observation.domainId?.toString() ?? indicator?.domainId.toString();
+      return {
+        domain: domainId ? domainNameById.get(domainId) : undefined,
+        stage: observation.stage,
+        stageScore: observation.stageScore,
+        title: observation.title,
+        text: observation.text,
+        occurredAt: observation.occurredAt
+      };
+    });
+
+    return AIAnalysisService.generateDevelopmentalAgeEstimate({
+      chronologicalAgeMonths: calculateAge(child.dateOfBirth).totalMonths,
+      domains: progress,
+      ageBands: ageBandEvidence,
+      recentObservations
+    });
+  }
+
+  static async refreshChildDevelopmentSnapshot(childId: string) {
+    const progress = await this.calculateChildProgress(childId);
+    const developmentalAge = await this.calculateDevelopmentalAge(childId, progress.domains);
+    const lastCalculatedAt = new Date();
+    const overallScore = this.calculateOverallScore(progress.domains);
+    const domainProgress = progress.domains.map((domain) => ({
+      domainId: new Types.ObjectId(domain.domainId),
+      name: domain.name,
+      percentage: domain.percentage,
+      stage: domain.stage,
+      observationCount: domain.observationCount,
+      keyword: domain.keyword
+    }));
+
+    await Child.findByIdAndUpdate(childId, {
+      $set: {
+        developmentProgress: domainProgress,
+        developmentOverallScore: overallScore,
+        developmentalAge: {
+          ...developmentalAge,
+          calculatedAt: lastCalculatedAt,
+          model: env.OPENAI_MODEL
+        },
+        developmentLastCalculatedAt: lastCalculatedAt
+      }
+    });
+
+    return {
+      childId,
+      domains: progress.domains,
+      overallScore,
+      developmentalAge,
+      lastCalculatedAt
+    };
   }
 
   static async calculateObservationSummary(childId: string) {

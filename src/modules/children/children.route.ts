@@ -5,7 +5,7 @@ import { requireChildAccess, requireChildOwner } from '../../middlewares/authori
 import { upload } from '../../middlewares/upload';
 import { validate } from '../../middlewares/validate';
 import { asyncHandler } from '../../utils/asyncHandler';
-import { ok, paginated } from '../../utils/apiResponse';
+import { ok } from '../../utils/apiResponse';
 import { calculateAge } from '../../utils/date';
 import { developmentalAgeDisplay } from '../../utils/developmentalAge';
 import { randomToken, hashToken } from '../../utils/crypto';
@@ -60,6 +60,16 @@ const emptyKeywordCounts = () => ({
   steady: 0,
   confident: 0
 });
+
+const keywordCountsForObservationFilter = async (filter: Record<string, unknown>) => {
+  const keywordFilter = { ...filter };
+  delete keywordFilter.stage;
+  const keywords = Object.keys(DEVELOPMENT_STAGE_SCORE) as Array<keyof typeof DEVELOPMENT_STAGE_SCORE>;
+  const counts = await Promise.all(
+    keywords.map(async (keyword) => [keyword, await Observation.countDocuments({ ...keywordFilter, stage: keyword })] as const)
+  );
+  return { ...emptyKeywordCounts(), ...Object.fromEntries(counts) };
+};
 
 type DomainAnalytics = {
   domainId: string | null;
@@ -341,7 +351,10 @@ childrenRouter.get('/children/:childId/activities', requireChildAccess(), asyncH
   const page = Number(req.query.page ?? 1);
   const limit = Number(req.query.limit ?? 20);
   const filter = await applyObservationFilters({ childId: req.params.childId, status: 'active' }, req.query);
-  const total = await Observation.countDocuments(filter);
+  const [total, keywordCounts] = await Promise.all([
+    Observation.countDocuments(filter),
+    keywordCountsForObservationFilter(filter)
+  ]);
   const activities = await Observation.find(filter)
     .populate('childId domainId indicatorId', 'fullName nickname profilePhoto name title')
     .populate('authorId', 'fullName profilePhoto caregiverRole daycareRole userType')
@@ -349,17 +362,31 @@ childrenRouter.get('/children/:childId/activities', requireChildAccess(), asyncH
     .skip((page - 1) * limit)
     .limit(limit);
   const counts = await SocialResponseService.observationCountMaps(activities.map((item) => item._id));
-  paginated(res, 'Activities', SocialResponseService.observations(activities, counts), page, limit, total);
+  res.json({
+    success: true,
+    message: 'Activities',
+    data: SocialResponseService.observations(activities, counts),
+    keywordCounts,
+    pagination: { page, limit, total, totalPages: Math.ceil(total / limit) }
+  });
 }));
 
 childrenRouter.get('/children/:childId/activity-history', requireChildAccess(), asyncHandler(async (req, res) => {
   const filter = await applyObservationFilters({ childId: req.params.childId, status: 'active' }, req.query);
-  const activities = await Observation.find(filter)
-    .populate('childId domainId indicatorId', 'fullName nickname profilePhoto name title')
-    .populate('authorId', 'fullName profilePhoto caregiverRole daycareRole userType')
-    .sort({ occurredAt: -1 });
+  const [activities, keywordCounts] = await Promise.all([
+    Observation.find(filter)
+      .populate('childId domainId indicatorId', 'fullName nickname profilePhoto name title')
+      .populate('authorId', 'fullName profilePhoto caregiverRole daycareRole userType')
+      .sort({ occurredAt: -1 }),
+    keywordCountsForObservationFilter(filter)
+  ]);
   const counts = await SocialResponseService.observationCountMaps(activities.map((item) => item._id));
-  ok(res, 'Activity history', SocialResponseService.observations(activities, counts));
+  res.json({
+    success: true,
+    message: 'Activity history',
+    data: SocialResponseService.observations(activities, counts),
+    keywordCounts
+  });
 }));
 
 childrenRouter.get('/children/:childId/milestones', requireChildAccess(), asyncHandler(async (req, res) => {

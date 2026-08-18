@@ -2199,6 +2199,8 @@ keyword=steady
 
 Domain can be provided as `domainName`, `domain`, or `domainId`. It accepts a domain id, exact domain name, or slug. `stage` is also accepted for `keyword`.
 
+`keywordCounts` uses the same child, domain, and date filters, but does not apply the selected `keyword` filter.
+
 Response:
 
 ```json
@@ -2206,6 +2208,12 @@ Response:
   "success": true,
   "message": "Activities",
   "data": [],
+  "keywordCounts": {
+    "emerging": 0,
+    "building": 0,
+    "steady": 0,
+    "confident": 0
+  },
   "pagination": {
     "page": 1,
     "limit": 20,
@@ -2236,7 +2244,13 @@ Response:
 {
   "success": true,
   "message": "Activity history",
-  "data": []
+  "data": [],
+  "keywordCounts": {
+    "emerging": 0,
+    "building": 0,
+    "steady": 0,
+    "confident": 0
+  }
 }
 ```
 

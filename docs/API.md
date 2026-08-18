@@ -461,14 +461,15 @@ Response:
 
 Auth: required
 
-Request body:
+Content type: `multipart/form-data`
 
-```json
-{
-  "fullName": "Jane Smith",
-  "phoneNumber": "+15555555555",
-  "bio": "Parent and caregiver"
-}
+Fields:
+
+```text
+fullName: optional
+phoneNumber: optional
+bio: optional
+photo: optional image/jpeg | image/png | image/webp
 ```
 
 Response:
@@ -483,6 +484,8 @@ Response:
   }
 }
 ```
+
+Possible errors: `400`, `503`
 
 ### GET `/profile/stats`
 
@@ -506,7 +509,7 @@ Response:
 
 ### PATCH `/profile/photo`
 
-Auth: required
+Auth: required. Legacy photo-only endpoint; prefer `PATCH /profile`.
 
 Content type: `multipart/form-data`
 

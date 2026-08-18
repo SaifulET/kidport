@@ -9,6 +9,7 @@ import { ok, paginated } from '../../utils/apiResponse';
 import { calculateAge } from '../../utils/date';
 import { developmentalAgeDisplay } from '../../utils/developmentalAge';
 import { randomToken, hashToken } from '../../utils/crypto';
+import { DEVELOPMENT_STAGE_SCORE } from '../../constants/stages';
 import { AccessibleChildrenService } from '../../services/AccessibleChildrenService';
 import { DevelopmentScoringService } from '../../services/DevelopmentScoringService';
 import { ObservationService } from '../../services/ObservationService';
@@ -40,9 +41,121 @@ const queryString = (value: unknown) => {
 const applyObservationFilters = async (filter: Record<string, unknown>, query: Record<string, unknown>) => {
   const domain = queryString(query.domainName) ?? queryString(query.domain) ?? queryString(query.domainId);
   const keyword = queryString(query.keyword) ?? queryString(query.stage);
+  const startDate = queryString(query.startDate);
+  const endDate = queryString(query.endDate);
   if (domain) filter.domainId = await ObservationService.resolveDomainId(domain);
   if (keyword) filter.stage = keyword;
+  if (startDate || endDate) {
+    filter.occurredAt = {
+      ...(startDate ? { $gte: new Date(startDate) } : {}),
+      ...(endDate ? { $lte: new Date(endDate) } : {})
+    };
+  }
   return filter;
+};
+
+const emptyKeywordCounts = () => ({
+  emerging: 0,
+  building: 0,
+  steady: 0,
+  confident: 0
+});
+
+type DomainAnalytics = {
+  domainId: string | null;
+  domain: string | null;
+  total: number;
+  milestones: number;
+  keywords: ReturnType<typeof emptyKeywordCounts>;
+  scoreSum: number;
+  scoreCount: number;
+};
+
+const childObservationAnalytics = async (childId: string, query: Record<string, unknown>) => {
+  const filter = await applyObservationFilters({ childId, status: 'active' }, query);
+  const observations = await Observation.find(filter)
+    .populate('domainId', 'name slug')
+    .select('domainId type stage stageScore isMilestone occurredAt')
+    .sort({ occurredAt: 1 });
+
+  const byKeyword = emptyKeywordCounts();
+  const byType = { text: 0, voice: 0, photo: 0, video: 0 };
+  const byDomain = new Map<string, DomainAnalytics>();
+  let firstObservedAt: Date | null = null;
+  let lastObservedAt: Date | null = null;
+  let totalMilestones = 0;
+  let scoreSum = 0;
+  let scoreCount = 0;
+
+  for (const observation of observations) {
+    const data = observation.toObject() as {
+      domainId?: { _id?: unknown; name?: string } | string;
+      type?: keyof typeof byType;
+      stage?: keyof typeof DEVELOPMENT_STAGE_SCORE;
+      stageScore?: number;
+      isMilestone?: boolean;
+      occurredAt?: Date;
+    };
+    const stage = data.stage;
+    const stageScore = data.stageScore ?? (stage ? DEVELOPMENT_STAGE_SCORE[stage] : undefined);
+
+    if (stage) byKeyword[stage] += 1;
+    if (data.type && data.type in byType) byType[data.type] += 1;
+    if (data.isMilestone) totalMilestones += 1;
+    if (typeof stageScore === 'number') {
+      scoreSum += stageScore;
+      scoreCount += 1;
+    }
+    if (data.occurredAt) {
+      firstObservedAt ??= data.occurredAt;
+      lastObservedAt = data.occurredAt;
+    }
+
+    const domainId = typeof data.domainId === 'object' && data.domainId?._id ? String(data.domainId._id) : data.domainId ? String(data.domainId) : null;
+    const domainName = typeof data.domainId === 'object' ? data.domainId.name ?? null : null;
+    const domainKey = domainId ?? 'unknown';
+    const domain = byDomain.get(domainKey) ?? {
+      domainId,
+      domain: domainName,
+      total: 0,
+      milestones: 0,
+      keywords: emptyKeywordCounts(),
+      scoreSum: 0,
+      scoreCount: 0
+    };
+
+    domain.total += 1;
+    if (data.isMilestone) domain.milestones += 1;
+    if (stage) domain.keywords[stage] += 1;
+    if (typeof stageScore === 'number') {
+      domain.scoreSum += stageScore;
+      domain.scoreCount += 1;
+    }
+    byDomain.set(domainKey, domain);
+  }
+
+  return {
+    childId,
+    totalObservations: observations.length,
+    totalMilestones,
+    averageStageScore: scoreCount ? Math.round((scoreSum / scoreCount) * 10) / 10 : null,
+    averageProgress: scoreCount ? Math.round((scoreSum / (4 * scoreCount)) * 100) : null,
+    firstObservedAt,
+    lastObservedAt,
+    byKeyword,
+    byType,
+    byDomain: Array.from(byDomain.values()).map(({ scoreSum: domainScoreSum, scoreCount: domainScoreCount, ...domain }) => ({
+      ...domain,
+      averageProgress: domainScoreCount ? Math.round((domainScoreSum / (4 * domainScoreCount)) * 100) : null
+    })),
+    filters: {
+      domain: queryString(query.domainName) ?? queryString(query.domain) ?? queryString(query.domainId) ?? null,
+      keyword: queryString(query.keyword) ?? queryString(query.stage) ?? null,
+      startDate: queryString(query.startDate) ?? null,
+      endDate: queryString(query.endDate) ?? null
+    },
+    lastCalculatedAt: new Date()
+  };
 };
 
 const measurementSchema = z.union([
@@ -191,6 +304,10 @@ childrenRouter.get('/children/:childId/development-progress', requireChildAccess
 
 childrenRouter.get('/children/:childId/observation-summary', requireChildAccess(), asyncHandler(async (req, res) => {
   ok(res, 'Observation summary', await DevelopmentScoringService.calculateObservationSummary(req.params.childId));
+}));
+
+childrenRouter.get('/children/:childId/observations/analytics', requireChildAccess(), asyncHandler(async (req, res) => {
+  ok(res, 'Observation analytics', await childObservationAnalytics(req.params.childId, req.query));
 }));
 
 childrenRouter.get('/children/:childId/dashboard', requireChildAccess(), asyncHandler(async (req, res) => {

@@ -2060,6 +2060,75 @@ Response:
 
 AI can refine the status counts from the child observation data. If AI is unavailable, the backend uses deterministic fallback logic: `confident` latest items are `achieved`, observed non-confident items are `inProgress`, and unobserved age-band indicators are `upcoming`.
 
+### GET `/children/:childId/observations/analytics`
+
+Auth: required, child access required
+
+Returns observation totals and breakdowns for one child.
+
+Query parameters:
+
+```text
+domainName=Language & Literacy
+keyword=steady
+startDate=2026-08-01
+endDate=2026-08-10
+```
+
+Domain can be provided as `domainName`, `domain`, or `domainId`. It accepts a domain id, exact domain name, or slug. `stage` is also accepted for `keyword`.
+
+Response:
+
+```json
+{
+  "success": true,
+  "message": "Observation analytics",
+  "data": {
+    "childId": "66f...",
+    "totalObservations": 24,
+    "totalMilestones": 5,
+    "averageStageScore": 3.1,
+    "averageProgress": 78,
+    "firstObservedAt": "2026-08-01T00:00:00.000Z",
+    "lastObservedAt": "2026-08-10T00:00:00.000Z",
+    "byKeyword": {
+      "emerging": 2,
+      "building": 4,
+      "steady": 13,
+      "confident": 5
+    },
+    "byType": {
+      "text": 14,
+      "voice": 3,
+      "photo": 6,
+      "video": 1
+    },
+    "byDomain": [
+      {
+        "domainId": "66f...",
+        "domain": "Language & Literacy",
+        "total": 8,
+        "milestones": 2,
+        "keywords": {
+          "emerging": 1,
+          "building": 1,
+          "steady": 4,
+          "confident": 2
+        },
+        "averageProgress": 72
+      }
+    ],
+    "filters": {
+      "domain": "Language & Literacy",
+      "keyword": "steady",
+      "startDate": "2026-08-01",
+      "endDate": "2026-08-10"
+    },
+    "lastCalculatedAt": "2026-08-10T00:00:00.000Z"
+  }
+}
+```
+
 ## Feed and Activity
 
 ### GET `/feed`

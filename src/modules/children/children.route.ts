@@ -11,6 +11,7 @@ import { developmentalAgeDisplay } from '../../utils/developmentalAge';
 import { randomToken, hashToken } from '../../utils/crypto';
 import { AccessibleChildrenService } from '../../services/AccessibleChildrenService';
 import { DevelopmentScoringService } from '../../services/DevelopmentScoringService';
+import { ObservationService } from '../../services/ObservationService';
 import { ReportService } from '../../services/ReportService';
 import { EmailService } from '../../services/EmailService';
 import { StorageService } from '../../services/StorageService';
@@ -29,6 +30,19 @@ const childResponse = (child: InstanceType<typeof Child>) => {
   const data = child.toObject();
   const { profilePhoto: _profilePhoto, ...rest } = data;
   return { ...rest, profileImage: child.profilePhoto?.url, age: calculateAge(child.dateOfBirth), developmentalAge: developmentalAgeDisplay(child.developmentalAge) };
+};
+
+const queryString = (value: unknown) => {
+  const stringValue = Array.isArray(value) ? value[0] : value;
+  return typeof stringValue === 'string' ? stringValue.trim() : undefined;
+};
+
+const applyObservationFilters = async (filter: Record<string, unknown>, query: Record<string, unknown>) => {
+  const domain = queryString(query.domainName) ?? queryString(query.domain) ?? queryString(query.domainId);
+  const keyword = queryString(query.keyword) ?? queryString(query.stage);
+  if (domain) filter.domainId = await ObservationService.resolveDomainId(domain);
+  if (keyword) filter.stage = keyword;
+  return filter;
 };
 
 const measurementSchema = z.union([
@@ -209,8 +223,9 @@ childrenRouter.get('/children/:childId/dashboard', requireChildAccess(), asyncHa
 childrenRouter.get('/children/:childId/activities', requireChildAccess(), asyncHandler(async (req, res) => {
   const page = Number(req.query.page ?? 1);
   const limit = Number(req.query.limit ?? 20);
-  const total = await Observation.countDocuments({ childId: req.params.childId, status: 'active' });
-  const activities = await Observation.find({ childId: req.params.childId, status: 'active' })
+  const filter = await applyObservationFilters({ childId: req.params.childId, status: 'active' }, req.query);
+  const total = await Observation.countDocuments(filter);
+  const activities = await Observation.find(filter)
     .populate('childId domainId indicatorId', 'fullName nickname profilePhoto name title')
     .populate('authorId', 'fullName profilePhoto caregiverRole daycareRole userType')
     .sort({ createdAt: -1 })
@@ -221,8 +236,7 @@ childrenRouter.get('/children/:childId/activities', requireChildAccess(), asyncH
 }));
 
 childrenRouter.get('/children/:childId/activity-history', requireChildAccess(), asyncHandler(async (req, res) => {
-  const filter: Record<string, unknown> = { childId: req.params.childId, status: 'active' };
-  if (req.query.domain) filter.domainId = req.query.domain;
+  const filter = await applyObservationFilters({ childId: req.params.childId, status: 'active' }, req.query);
   const activities = await Observation.find(filter)
     .populate('childId domainId indicatorId', 'fullName nickname profilePhoto name title')
     .populate('authorId', 'fullName profilePhoto caregiverRole daycareRole userType')

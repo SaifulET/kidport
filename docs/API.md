@@ -2121,7 +2121,11 @@ Query parameters:
 ```text
 page=1
 limit=20
+domainName=Language & Literacy
+keyword=steady
 ```
+
+Domain can be provided as `domainName`, `domain`, or `domainId`. It accepts a domain id, exact domain name, or slug. `stage` is also accepted for `keyword`.
 
 Response:
 
@@ -2148,8 +2152,11 @@ Auth: required, child access required
 Query parameters:
 
 ```text
-domain=66f...
+domain=Language & Literacy
+keyword=steady
 ```
+
+Domain can be provided as `domainName`, `domain`, or `domainId`. It accepts a domain id, exact domain name, or slug. `stage` is also accepted for `keyword`.
 
 Response:
 

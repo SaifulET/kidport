@@ -24,7 +24,7 @@ careCircleRouter.post(
   '/children/:childId/care-circle/invite',
   requireAuth,
   requireChildOwner(),
-  validate(z.object({ body: z.object({ email: z.string().min(1), role: z.string(), relationship: z.string(), message: z.string().optional() }) })),
+  validate(z.object({ body: z.object({ email: z.string().min(1), role: z.string(), message: z.string().optional() }) })),
   asyncHandler(async (req, res) => {
     const email = req.body.email.toLowerCase().trim();
     if (!z.string().email().safeParse(email).success) throw new AppError('Invalid email', 400);
@@ -53,7 +53,6 @@ careCircleRouter.post(
       childId: req.params.childId,
       invitedBy: req.user!._id,
       role: req.body.role,
-      relationship: req.body.relationship,
       message: req.body.message,
       expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
     });

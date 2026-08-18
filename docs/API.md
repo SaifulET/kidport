@@ -955,7 +955,6 @@ Request body:
 {
   "email": "nanny@example.com",
   "role": "nanny",
-  "relationship": "weekday nanny",
   "message": "Please join Ava's care circle."
 }
 ```

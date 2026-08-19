@@ -21,6 +21,7 @@ const cleanString = (value: unknown) =>
   typeof value === 'string' ? value.trim().replace(/^["']|["']$/g, '') : value;
 
 const stageSchema = z.preprocess(cleanString, z.enum(['emerging', 'building', 'steady', 'confident']));
+const statusSchema = z.preprocess(cleanString, z.enum(['active', 'draft']));
 
 const createSchema = z.object({
   body: z
@@ -36,12 +37,32 @@ const createSchema = z.object({
       react: z.preprocess(cleanString, z.string()).optional(),
       reaction: z.preprocess(cleanString, z.string()).optional(),
       mood: z.string().optional(),
-      occurredAt: z.coerce.date().optional()
+      occurredAt: z.coerce.date().optional(),
+      status: statusSchema.optional()
     })
     .superRefine((body, ctx) => {
+      if (body.status === 'draft') return;
       if (!body.keyword && !body.stage) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['keyword'], message: 'Keyword is required' });
       if (!body.domain && !body.domainId) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['domain'], message: 'Domain is required' });
     })
+});
+
+const updateSchema = z.object({
+  body: z
+    .object({
+      type: z.enum(['text', 'voice', 'photo', 'video']).optional(),
+      observation: z.preprocess(cleanString, z.string()).optional(),
+      text: z.preprocess(cleanString, z.string()).optional(),
+      domain: z.preprocess(cleanString, z.string()).optional(),
+      domainId: z.preprocess(cleanString, z.string()).optional(),
+      indicatorId: z.string().optional(),
+      keyword: stageSchema.optional(),
+      stage: stageSchema.optional(),
+      mood: z.string().optional(),
+      occurredAt: z.coerce.date().optional(),
+      status: statusSchema.optional()
+    })
+    .refine((body) => Object.values(body).some((value) => value !== undefined), { message: 'At least one field is required' })
 });
 
 const inferObservationType = (type: string | undefined, files: Express.Multer.File[]) => {
@@ -55,6 +76,13 @@ const inferObservationType = (type: string | undefined, files: Express.Multer.Fi
 
 const shouldReact = (value: unknown) => value === true || value === 'true' || value === 'love';
 
+const observationStatus = (value: unknown) => {
+  const status = cleanString(value);
+  if (status === undefined) return undefined;
+  if (status === 'active' || status === 'draft') return status;
+  throw new AppError('Status must be active or draft', 400);
+};
+
 const observationCard = async (observationId: unknown) => {
   const observation = await Observation.findById(observationId)
     .populate('childId domainId indicatorId', 'fullName nickname profilePhoto name title')
@@ -67,7 +95,8 @@ const observationCard = async (observationId: unknown) => {
 observationsRouter.post('/children/:childId/observations', requireChildAccess(), upload.fields([{ name: 'media', maxCount: 5 }, { name: 'observation', maxCount: 5 }]), validate(createSchema), asyncHandler(async (req, res) => {
   const uploadedFiles = req.files as Record<string, Express.Multer.File[]> | undefined;
   const files = [...(uploadedFiles?.media ?? []), ...(uploadedFiles?.observation ?? [])];
-  if (!req.body.observation && !req.body.text && files.length === 0) {
+  const status = observationStatus(req.body.status);
+  if (status !== 'draft' && !req.body.observation && !req.body.text && files.length === 0) {
     throw new AppError('Observation text or media is required', 400);
   }
   const observation = await ObservationService.create({
@@ -80,9 +109,10 @@ observationsRouter.post('/children/:childId/observations', requireChildAccess(),
     stage: req.body.keyword ?? req.body.stage,
     mood: req.body.mood,
     occurredAt: req.body.occurredAt,
-    files
+    files,
+    status
   });
-  if (shouldReact(req.body.react ?? req.body.reaction)) {
+  if (status !== 'draft' && shouldReact(req.body.react ?? req.body.reaction)) {
     await Reaction.findOneAndUpdate(
       { observationId: observation._id, userId: req.user!._id, type: 'love' },
       { $setOnInsert: { childId: observation.childId } },
@@ -94,6 +124,7 @@ observationsRouter.post('/children/:childId/observations', requireChildAccess(),
 
 for (const type of ['text', 'voice', 'photo', 'video'] as const) {
   observationsRouter.post(`/children/:childId/observations/${type}`, requireChildAccess(), upload.array('media', 5), asyncHandler(async (req, res) => {
+    const status = observationStatus(req.body.status);
     const observation = await ObservationService.create({
       childId: req.params.childId,
       authorId: req.user!._id.toString(),
@@ -104,15 +135,35 @@ for (const type of ['text', 'voice', 'photo', 'video'] as const) {
       stage: req.body.stage,
       mood: req.body.mood,
       occurredAt: req.body.occurredAt ? new Date(req.body.occurredAt) : undefined,
-      files: req.files as Express.Multer.File[]
+      files: req.files as Express.Multer.File[],
+      status
     });
     ok(res, 'Observation created successfully', await observationCard(observation._id), 201);
   }));
 }
 
+observationsRouter.patch('/observations/:observationId', validate(updateSchema), asyncHandler(async (req, res) => {
+  const observation = await ObservationService.updateDraft({
+    observationId: req.params.observationId,
+    userId: req.user!._id.toString(),
+    type: req.body.type,
+    text: req.body.observation ?? req.body.text,
+    domainId: req.body.domain ?? req.body.domainId,
+    indicatorId: req.body.indicatorId,
+    stage: req.body.keyword ?? req.body.stage,
+    mood: req.body.mood,
+    occurredAt: req.body.occurredAt,
+    status: req.body.status
+  });
+  ok(res, 'Observation updated successfully', await observationCard(observation._id));
+}));
+
 observationsRouter.get('/observations/:observationId', asyncHandler(async (req, res) => {
   const observation = await Observation.findById(req.params.observationId);
   if (!observation) throw new AppError('Observation not found', 404);
+  if (observation.status === 'draft' && observation.authorId.toString() !== req.user!._id.toString()) {
+    throw new AppError('Only the draft author can view this observation', 403);
+  }
   const access = await AuthorizationService.getChildAccess(req.user!._id.toString(), observation.childId.toString());
   if (!access) throw new AppError('You do not have access to this child', 403);
   ok(res, 'Observation', await observationCard(req.params.observationId));
@@ -121,6 +172,9 @@ observationsRouter.get('/observations/:observationId', asyncHandler(async (req, 
 observationsRouter.get('/observations/:observationId/details', asyncHandler(async (req, res) => {
   const observation = await Observation.findById(req.params.observationId);
   if (!observation) throw new AppError('Observation not found', 404);
+  if (observation.status === 'draft' && observation.authorId.toString() !== req.user!._id.toString()) {
+    throw new AppError('Only the draft author can view this observation', 403);
+  }
   const access = await AuthorizationService.getChildAccess(req.user!._id.toString(), observation.childId.toString());
   if (!access) throw new AppError('You do not have access to this child', 403);
 

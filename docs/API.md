@@ -1766,15 +1766,18 @@ Request fields:
   "observation": "Ava named three colors during play.",
   "keyword": "steady",
   "domain": "Language & Literacy",
-  "react": "love"
+  "react": "love",
+  "status": "active"
 }
 ```
 
-Required fields: `keyword`, `domain`, and either `observation` text or a media file.
+Required fields for active observations: `keyword`, `domain`, and either `observation` text or a media file.
 
 `keyword` must be one of `emerging`, `building`, `steady`, or `confident`.
 
 `domain` can be a domain id, exact domain name, or slug. `domainId` is also supported.
+
+`status` is optional and can be `active` or `draft`. When `status` is `draft`, the backend stores the observation without requiring `keyword`, `domain`, text, or media. Draft observations do not update development scoring, milestones, reactions, or active observation lists until they are edited and saved as `active`.
 
 Multipart media field:
 
@@ -1790,7 +1793,7 @@ If a caregiver uploads an image, audio, or video, the backend saves the media to
 
 For plain text observations, the backend generates/refines card display fields before responding: `title`, `description`, `progress`, and emoji-style `icon` such as `\uD83C\uDFE0` or `\uD83D\uDCAC`. For media observations, the response includes fallback display fields immediately and updates them in the background after media processing finishes. Clients can poll `GET /observations/:observationId` and inspect `aiProcessing.status`.
 
-Optional fields: `type`, `text`, `stage`, `indicatorId`, `mood`, `occurredAt`, `reaction`.
+Optional fields: `type`, `text`, `stage`, `indicatorId`, `mood`, `occurredAt`, `reaction`, `status`.
 
 If `react` is `"love"` or `"true"`, the backend also creates a `love` reaction from the current user for the new observation.
 
@@ -1814,6 +1817,7 @@ Response:
     "description": "Ava identified three colors accurately during play.",
     "progress": 75,
     "icon": "\uD83C\uDFA8",
+    "status": "active",
     "aiProcessing": {
       "status": "completed",
       "queuedAt": "2026-08-17T16:00:00.000Z",
@@ -1837,6 +1841,28 @@ Response:
 ```
 
 Possible errors: `400`, `403`, `404`, `503`
+
+### PATCH `/observations/:observationId`
+
+Auth: required, draft author required
+
+Edits a draft observation. To publish a draft, send `status: "active"` with the fields required for an active observation.
+
+Request body:
+
+```json
+{
+  "observation": "Ava named three colors during play.",
+  "keyword": "steady",
+  "domain": "Language & Literacy",
+  "status": "active"
+}
+```
+
+Editable fields: `type`, `observation`, `text`, `keyword`, `stage`, `domain`, `domainId`, `indicatorId`, `mood`, `occurredAt`, `status`.
+
+Possible errors: `400`, `403`, `404`
+
 ### POST `/children/:childId/observations/text`
 
 Auth: required, child access required

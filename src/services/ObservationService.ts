@@ -26,6 +26,20 @@ export type CreateObservationInput = {
   mood?: string;
   occurredAt?: Date;
   files?: Express.Multer.File[];
+  status?: 'active' | 'draft';
+};
+
+export type UpdateDraftObservationInput = {
+  observationId: string;
+  userId: string;
+  type?: 'text' | 'voice' | 'photo' | 'video';
+  text?: string;
+  domainId?: string;
+  indicatorId?: string;
+  stage?: DevelopmentStage;
+  mood?: string;
+  occurredAt?: Date;
+  status?: 'active' | 'draft';
 };
 
 type MediaProcessingJob = {
@@ -143,6 +157,8 @@ export class ObservationService {
   }
 
   static async create(input: CreateObservationInput) {
+    const status = input.status ?? 'active';
+    const isDraft = status === 'draft';
     const domainId = await this.resolveDomainId(input.domainId);
     await this.validateDomainIndicator(domainId, input.indicatorId);
     const [child, domain, indicator] = await Promise.all([
@@ -176,11 +192,13 @@ export class ObservationService {
       stage: input.stage,
       stageScore
     };
-    const display = media.length
-      ? AIAnalysisService.fallbackObservationDisplay(displayInput)
-      : await AIAnalysisService.generateObservationDisplay(displayInput);
+    const display = isDraft
+      ? null
+      : media.length
+        ? AIAnalysisService.fallbackObservationDisplay(displayInput)
+        : await AIAnalysisService.generateObservationDisplay(displayInput);
 
-    const isMilestone = this.isMilestoneStage(input.stage);
+    const isMilestone = !isDraft && this.isMilestoneStage(input.stage);
     const observation = await Observation.create({
       childId: input.childId,
       authorId: input.authorId,
@@ -189,11 +207,11 @@ export class ObservationService {
       classroomId: child.classroom,
       type: input.type,
       text,
-      title: display.title,
-      description: display.description,
-      progress: display.progress,
+      title: display?.title,
+      description: display?.description,
+      progress: display?.progress,
       media,
-      icon: display.icon,
+      icon: display?.icon,
       domainId,
       indicatorId: input.indicatorId,
       stage: input.stage,
@@ -201,7 +219,8 @@ export class ObservationService {
       mood: input.mood,
       occurredAt: input.occurredAt ?? new Date(),
       isMilestone,
-      aiMetadata: media.length
+      status,
+      aiMetadata: !isDraft && media.length
         ? {
             observationProcessing: {
               status: 'queued',
@@ -221,7 +240,7 @@ export class ObservationService {
       });
     }
 
-    if (media.length) {
+    if (!isDraft && media.length) {
       this.queueMediaProcessing({
         observationId: observation._id.toString(),
         childId: input.childId,
@@ -234,9 +253,99 @@ export class ObservationService {
       });
     }
 
-    void DevelopmentScoringService.refreshChildDevelopmentSnapshot(input.childId).catch((error) => {
-      console.error('Failed to refresh child development snapshot', error);
+    if (!isDraft) {
+      void DevelopmentScoringService.refreshChildDevelopmentSnapshot(input.childId).catch((error) => {
+        console.error('Failed to refresh child development snapshot', error);
+      });
+    }
+
+    return observation;
+  }
+
+  static async updateDraft(input: UpdateDraftObservationInput) {
+    const observation = await Observation.findById(input.observationId);
+    if (!observation) throw new AppError('Observation not found', 404);
+    if (observation.authorId.toString() !== input.userId) throw new AppError('Only the draft author can edit this observation', 403);
+    if (observation.status !== 'draft') throw new AppError('Only draft observations can be edited', 400);
+
+    const status = input.status ?? 'draft';
+    const domainId = input.domainId !== undefined ? await this.resolveDomainId(input.domainId) : observation.domainId?.toString();
+    const indicatorId = input.indicatorId !== undefined ? input.indicatorId : observation.indicatorId?.toString();
+    await this.validateDomainIndicator(domainId, indicatorId);
+
+    const [child, domain, indicator] = await Promise.all([
+      Child.findById(observation.childId),
+      domainId ? DevelopmentDomain.findById(domainId).select('name') : null,
+      indicatorId ? DevelopmentIndicator.findById(indicatorId).select('title description') : null
+    ]);
+    if (!child) throw new AppError('Child not found', 404);
+
+    const text = input.text !== undefined ? input.text?.trim() : observation.text ?? undefined;
+    const stage = input.stage !== undefined ? input.stage : observation.stage ?? undefined;
+    const stageScore = stage ? DEVELOPMENT_STAGE_SCORE[stage] : undefined;
+    const media = observation.media ?? [];
+
+    if (status === 'active') {
+      if (!text && media.length === 0) throw new AppError('Observation text or media is required', 400);
+      if (!stage) throw new AppError('Keyword is required', 400);
+      if (!domainId) throw new AppError('Domain is required', 400);
+    }
+
+    const displayInput = {
+      text,
+      domain: domain?.name,
+      indicatorTitle: indicator?.title,
+      stage,
+      stageScore
+    };
+    const display = status === 'active'
+      ? media.length
+        ? AIAnalysisService.fallbackObservationDisplay(displayInput)
+        : await AIAnalysisService.generateObservationDisplay(displayInput)
+      : undefined;
+    const isMilestone = status === 'active' && this.isMilestoneStage(stage);
+
+    observation.set({
+      ...(input.type ? { type: input.type } : {}),
+      ...(input.text !== undefined ? { text } : {}),
+      ...(input.domainId !== undefined ? { domainId } : {}),
+      ...(input.indicatorId !== undefined ? { indicatorId } : {}),
+      ...(input.stage !== undefined ? { stage, stageScore } : {}),
+      ...(input.mood !== undefined ? { mood: input.mood } : {}),
+      ...(input.occurredAt !== undefined ? { occurredAt: input.occurredAt } : {}),
+      ...(display ? { title: display.title, description: display.description, progress: display.progress, icon: display.icon } : {}),
+      status,
+      isMilestone
     });
+    await observation.save();
+
+    if (status === 'active') {
+      if (isMilestone) {
+        const membershipUserIds = await CareCircleMembership.find({ childId: observation.childId, status: 'active' }).distinct('userId');
+        const recipients = [child.createdBy.toString(), ...membershipUserIds.map(String)];
+        await NotificationService.createMany([...new Set(recipients)], 'milestone_achieved', 'New milestone achieved', `${child.fullName} reached a confident milestone.`, {
+          childId: observation.childId.toString(),
+          observationId: observation._id.toString()
+        });
+      }
+
+      if (media.length) {
+        this.queueMediaProcessing({
+          observationId: observation._id.toString(),
+          childId: observation.childId.toString(),
+          providedText: text,
+          media: media as StoredMedia[],
+          domainName: domain?.name,
+          indicatorTitle: indicator?.title,
+          stage,
+          stageScore
+        });
+      }
+
+      void DevelopmentScoringService.refreshChildDevelopmentSnapshot(observation.childId.toString()).catch((error) => {
+        console.error('Failed to refresh child development snapshot', error);
+      });
+    }
 
     return observation;
   }

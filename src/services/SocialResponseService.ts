@@ -125,6 +125,7 @@ export class SocialResponseService {
       description: data.description ?? null,
       progress: data.progress ?? null,
       icon: data.icon ?? null,
+      status: data.status ?? null,
       aiProcessing: observationProcessingStatus(data.aiMetadata),
       milestone: isMilestone
         ? {

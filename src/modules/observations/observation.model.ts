@@ -35,7 +35,7 @@ const observationSchema = new Schema(
     occurredAt: { type: Date, default: Date.now, index: true },
     aiMetadata: Schema.Types.Mixed,
     isMilestone: { type: Boolean, default: false, index: true },
-    status: { type: String, enum: ['active', 'hidden', 'deleted'], default: 'active', index: true }
+    status: { type: String, enum: ['active', 'draft', 'hidden', 'deleted'], default: 'active', index: true }
   },
   { timestamps: true }
 );

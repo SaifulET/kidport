@@ -111,8 +111,16 @@ export class ObservationService {
         }
       );
 
-      const generatedText = job.providedText ? null : await AIAnalysisService.generateObservationTextFromStoredMedia(job.media);
-      const text = job.providedText || generatedText || this.mediaFallbackText(job.media);
+      const mediaText = await AIAnalysisService.generateObservationTextFromStoredMedia(job.media);
+      const text =
+        (await AIAnalysisService.generateObservationText({
+          providedText: job.providedText,
+          mediaText: mediaText ?? this.mediaFallbackText(job.media),
+          domain: job.domainName,
+          indicatorTitle: job.indicatorTitle,
+          stage: job.stage,
+          stageScore: job.stageScore
+        })) ?? this.mediaFallbackText(job.media);
       const display = await AIAnalysisService.generateObservationDisplay({
         text,
         domain: job.domainName,
@@ -132,7 +140,7 @@ export class ObservationService {
             icon: display.icon,
             'aiMetadata.observationProcessing.status': 'completed',
             'aiMetadata.observationProcessing.completedAt': new Date(),
-            'aiMetadata.observationProcessing.mediaTextGenerated': Boolean(generatedText),
+            'aiMetadata.observationProcessing.mediaTextGenerated': Boolean(mediaText),
             'aiMetadata.observationProcessing.mediaCount': job.media.length
           }
         }
@@ -183,7 +191,20 @@ export class ObservationService {
 
     const providedText = input.text?.trim();
     const stageScore = input.stage ? DEVELOPMENT_STAGE_SCORE[input.stage] : undefined;
-    const text = providedText || (media.length ? this.mediaFallbackText(media) : undefined);
+    const mediaText = !isDraft && input.files?.length ? await AIAnalysisService.generateObservationTextFromMedia(input.files) : null;
+    const generatedText =
+      isDraft
+        ? providedText || (media.length ? this.mediaFallbackText(media) : undefined)
+        : await AIAnalysisService.generateObservationText({
+            providedText,
+            mediaText: mediaText ?? (media.length ? this.mediaFallbackText(media) : undefined),
+            domain: domain?.name,
+            indicatorTitle: indicator?.title,
+            stage: input.stage,
+            stageScore,
+            type: input.type
+          });
+    const text = generatedText ?? undefined;
 
     const displayInput = {
       text,
@@ -194,9 +215,7 @@ export class ObservationService {
     };
     const display = isDraft
       ? null
-      : media.length
-        ? AIAnalysisService.fallbackObservationDisplay(displayInput)
-        : await AIAnalysisService.generateObservationDisplay(displayInput);
+      : await AIAnalysisService.generateObservationDisplay(displayInput);
 
     const isMilestone = !isDraft && this.isMilestoneStage(input.stage);
     const observation = await Observation.create({
@@ -223,8 +242,9 @@ export class ObservationService {
       aiMetadata: !isDraft && media.length
         ? {
             observationProcessing: {
-              status: 'queued',
-              queuedAt: new Date(),
+              status: 'completed',
+              completedAt: new Date(),
+              mediaTextGenerated: Boolean(mediaText),
               mediaCount: media.length
             }
           }
@@ -237,19 +257,6 @@ export class ObservationService {
       await NotificationService.createMany([...new Set(recipients)], 'milestone_achieved', 'New milestone achieved', `${child.fullName} reached a confident milestone.`, {
         childId: input.childId,
         observationId: observation._id.toString()
-      });
-    }
-
-    if (!isDraft && media.length) {
-      this.queueMediaProcessing({
-        observationId: observation._id.toString(),
-        childId: input.childId,
-        providedText,
-        media,
-        domainName: domain?.name,
-        indicatorTitle: indicator?.title,
-        stage: input.stage,
-        stageScore
       });
     }
 
@@ -291,23 +298,36 @@ export class ObservationService {
       if (!domainId) throw new AppError('Domain is required', 400);
     }
 
+    const mediaText = status === 'active' && media.length ? await AIAnalysisService.generateObservationTextFromStoredMedia(media as StoredMedia[]) : null;
+    const generatedObservationText =
+      status === 'active'
+        ? await AIAnalysisService.generateObservationText({
+            providedText: text,
+            mediaText: mediaText ?? (media.length ? this.mediaFallbackText(media as StoredMedia[]) : undefined),
+            domain: domain?.name,
+            indicatorTitle: indicator?.title,
+            stage,
+            stageScore,
+            type: input.type ?? observation.type
+          })
+        : text;
+    const observationText = generatedObservationText ?? undefined;
+
     const displayInput = {
-      text,
+      text: observationText,
       domain: domain?.name,
       indicatorTitle: indicator?.title,
       stage,
       stageScore
     };
     const display = status === 'active'
-      ? media.length
-        ? AIAnalysisService.fallbackObservationDisplay(displayInput)
-        : await AIAnalysisService.generateObservationDisplay(displayInput)
+      ? await AIAnalysisService.generateObservationDisplay(displayInput)
       : undefined;
     const isMilestone = status === 'active' && this.isMilestoneStage(stage);
 
     observation.set({
       ...(input.type ? { type: input.type } : {}),
-      ...(input.text !== undefined ? { text } : {}),
+      ...(input.text !== undefined || status === 'active' ? { text: observationText } : {}),
       ...(input.domainId !== undefined ? { domainId } : {}),
       ...(input.indicatorId !== undefined ? { indicatorId } : {}),
       ...(input.stage !== undefined ? { stage, stageScore } : {}),
@@ -326,19 +346,6 @@ export class ObservationService {
         await NotificationService.createMany([...new Set(recipients)], 'milestone_achieved', 'New milestone achieved', `${child.fullName} reached a confident milestone.`, {
           childId: observation.childId.toString(),
           observationId: observation._id.toString()
-        });
-      }
-
-      if (media.length) {
-        this.queueMediaProcessing({
-          observationId: observation._id.toString(),
-          childId: observation.childId.toString(),
-          providedText: text,
-          media: media as StoredMedia[],
-          domainName: domain?.name,
-          indicatorTitle: indicator?.title,
-          stage,
-          stageScore
         });
       }
 

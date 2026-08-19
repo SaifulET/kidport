@@ -54,6 +54,10 @@ const applyObservationFilters = async (filter: Record<string, unknown>, query: R
   return filter;
 };
 
+const visibleObservationStatusFilter = (authorId: unknown) => ({
+  $or: [{ status: 'active' }, { status: 'draft', authorId }]
+});
+
 const emptyKeywordCounts = () => ({
   emerging: 0,
   building: 0,
@@ -391,7 +395,7 @@ childrenRouter.get('/children/:childId/dashboard', requireChildAccess(), asyncHa
 childrenRouter.get('/children/:childId/activities', requireChildAccess(), asyncHandler(async (req, res) => {
   const page = Number(req.query.page ?? 1);
   const limit = Number(req.query.limit ?? 20);
-  const filter = await applyObservationFilters({ childId: req.params.childId, status: 'active' }, req.query);
+  const filter = await applyObservationFilters({ childId: req.params.childId, ...visibleObservationStatusFilter(req.user!._id) }, req.query);
   const [total, keywordCounts] = await Promise.all([
     Observation.countDocuments(filter),
     keywordCountsForObservationFilter(filter)
@@ -413,7 +417,7 @@ childrenRouter.get('/children/:childId/activities', requireChildAccess(), asyncH
 }));
 
 childrenRouter.get('/children/:childId/activity-history', requireChildAccess(), asyncHandler(async (req, res) => {
-  const filter = await applyObservationFilters({ childId: req.params.childId, status: 'active' }, req.query);
+  const filter = await applyObservationFilters({ childId: req.params.childId, ...visibleObservationStatusFilter(req.user!._id) }, req.query);
   const [activities, keywordCounts] = await Promise.all([
     Observation.find(filter)
       .populate('childId domainId indicatorId', 'fullName nickname profilePhoto name title')

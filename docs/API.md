@@ -1789,9 +1789,9 @@ media: one or more image, audio, or video files
 
 When `type` is omitted, the backend infers it from `media`; if no media is uploaded, it uses `text`.
 
-If a caregiver uploads an image, audio, or video, the backend saves the media to S3 before responding. Media AI processing then runs in the background so large media does not hold the HTTP request open. When no observation text is supplied, the response initially uses a fallback media-upload note and later updates the observation text from the saved media. Images are converted to a short visible-behavior observation. Audio and video are transcribed. This requires `OPENAI_API_KEY`; if AI conversion is unavailable, the backend keeps the fallback media-upload note.
+If a caregiver uploads an image, audio, or video for an active observation, the backend analyzes the media before responding and stores a concise child-development observation in `observation`. If caregiver text is also supplied, the backend combines the text with the media analysis and stores one refined observation. Images are converted to a short visible-behavior observation. Audio and supported video/audio files are transcribed, then rewritten as an observation. This requires `OPENAI_API_KEY`; if AI conversion is unavailable, the backend keeps the supplied text or a fallback media-upload note.
 
-For plain text observations, the backend generates/refines card display fields before responding: `title`, `description`, `progress`, and emoji-style `icon` such as `\uD83C\uDFE0` or `\uD83D\uDCAC`. For media observations, the response includes fallback display fields immediately and updates them in the background after media processing finishes. Clients can poll `GET /observations/:observationId` and inspect `aiProcessing.status`.
+For active observations, the backend generates/refines card display fields before responding: `title`, `description`, `progress`, and emoji-style `icon` such as `\uD83C\uDFE0` or `\uD83D\uDCAC`. Clients can inspect `aiProcessing.status` to see whether media analysis completed.
 
 Optional fields: `type`, `text`, `stage`, `indicatorId`, `mood`, `occurredAt`, `reaction`, `status`.
 
@@ -2168,6 +2168,8 @@ Response:
 
 Auth: required
 
+Returns active observations plus draft observations authored by the logged-in user. Draft observations are not visible to other caregivers until published as `active`.
+
 Query parameters:
 
 ```text
@@ -2221,6 +2223,8 @@ Auth: required, child access required
 
 `data` items use the same compact observation-card shape as `/feed`.
 
+Returns active observations plus draft observations authored by the logged-in user. Draft observations are not visible to other caregivers until published as `active`.
+
 Query parameters:
 
 ```text
@@ -2262,6 +2266,8 @@ Auth: required, child access required
 
 `data` items use the same compact observation-card shape as `/feed`.
 
+Returns active observations plus draft observations authored by the logged-in user. Draft observations are not visible to other caregivers until published as `active`.
+
 Query parameters:
 
 ```text
@@ -2291,7 +2297,7 @@ Response:
 
 Auth: required
 
-Returns paginated observations across all children the authenticated user can access. Supports the same query parameters as `/feed`: `page`, `limit`, `childId`, `domainId`, `startDate`, and `endDate`.
+Returns paginated active observations across all children the authenticated user can access, plus draft observations authored by the logged-in user. Draft observations are not visible to other caregivers until published as `active`. Supports the same query parameters as `/feed`: `page`, `limit`, `childId`, `domainId`, `startDate`, and `endDate`.
 
 ## Milestones and Achievements
 

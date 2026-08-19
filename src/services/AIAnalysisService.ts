@@ -28,6 +28,10 @@ const observationDisplaySchema = z.object({
   icon: z.string().min(1).max(8)
 });
 
+const observationTextSchema = z.object({
+  observation: z.string().min(1).max(600)
+});
+
 const domainProgressKeywordsSchema = z.object({
   domains: z.array(
     z.object({
@@ -127,6 +131,16 @@ type MediaAnalysisFile = {
   buffer: Buffer;
   mimetype: string;
   originalname: string;
+};
+
+type ObservationTextInput = {
+  providedText?: string;
+  mediaText?: string | null;
+  domain?: string;
+  indicatorTitle?: string;
+  stage?: string;
+  stageScore?: number;
+  type?: string;
 };
 
 export class AIAnalysisService {
@@ -262,6 +276,49 @@ export class AIAnalysisService {
     );
 
     return this.generateObservationTextFromMedia(files);
+  }
+
+  static fallbackObservationText(input: ObservationTextInput) {
+    const parts = [input.providedText?.trim(), input.mediaText?.trim()].filter(Boolean);
+    return parts.join(' ').trim() || null;
+  }
+
+  static async generateObservationText(input: ObservationTextInput) {
+    const fallback = this.fallbackObservationText(input);
+    const client = this.client();
+    if (!client || !fallback) return fallback;
+
+    try {
+      const response = await client.chat.completions.create({
+        model: env.OPENAI_MODEL,
+        response_format: { type: 'json_object' },
+        messages: [
+          {
+            role: 'system',
+            content:
+              'Create one valid child-development observation from caregiver text and/or analyzed media. Return valid JSON only with observation. Describe observable behavior in clear caregiver language. Do not identify people, diagnose, infer medical conditions, or add facts not present in the input. Keep it concise and appropriate for a child development record.'
+          },
+          {
+            role: 'user',
+            content: JSON.stringify({
+              requiredJsonShape: { observation: 'string' },
+              providedText: input.providedText,
+              mediaAnalysis: input.mediaText,
+              domain: input.domain,
+              indicatorTitle: input.indicatorTitle,
+              stage: input.stage,
+              suggestedProgress: input.stageScore ? Math.min(100, Math.max(0, input.stageScore * 25)) : undefined,
+              type: input.type
+            })
+          }
+        ]
+      }, this.requestOptions());
+
+      return observationTextSchema.parse(JSON.parse(response.choices[0]?.message.content ?? '{}')).observation.trim();
+    } catch (error) {
+      this.logAIError('Failed to generate observation text', error);
+      return fallback;
+    }
   }
 
   static fallbackObservationDisplay(input: { text?: string; domain?: string; indicatorTitle?: string; stage?: string; stageScore?: number }) {

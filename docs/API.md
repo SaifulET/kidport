@@ -2232,9 +2232,12 @@ page=1
 limit=20
 domainName=Language & Literacy
 keyword=steady
+status=draft
 ```
 
 Domain can be provided as `domainName`, `domain`, or `domainId`. It accepts a domain id, exact domain name, or slug. `stage` is also accepted for `keyword`.
+
+`status` can be `active` or `draft`. `status=draft` returns only draft observations authored by the logged-in user.
 
 `keywordCounts` uses the same child, domain, and date filters, but does not apply the selected `keyword` filter.
 
@@ -2273,9 +2276,12 @@ Query parameters:
 ```text
 domain=Language & Literacy
 keyword=steady
+status=active
 ```
 
 Domain can be provided as `domainName`, `domain`, or `domainId`. It accepts a domain id, exact domain name, or slug. `stage` is also accepted for `keyword`.
+
+`status` can be `active` or `draft`. `status=draft` returns only draft observations authored by the logged-in user.
 
 Response:
 

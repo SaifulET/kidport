@@ -251,11 +251,11 @@ export class AIAnalysisService {
     const generated = await Promise.all(
       files.map(async (file) => {
         try {
-          if (file.mimetype.startsWith('image/')) return this.describeImage(client, file);
-          if (file.mimetype.startsWith('audio/') || file.mimetype.startsWith('video/')) return this.transcribeAudio(client, file);
+          if (file.mimetype.startsWith('image/')) return await this.describeImage(client, file);
+          if (file.mimetype.startsWith('audio/') || file.mimetype.startsWith('video/')) return await this.transcribeAudio(client, file);
           return null;
         } catch (error) {
-          console.error('Failed to generate observation text from media', error);
+          this.logAIError('Failed to generate observation text from media', error);
           return null;
         }
       })

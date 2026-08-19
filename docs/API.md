@@ -1789,9 +1789,9 @@ media: one or more image, audio, or video files
 
 When `type` is omitted, the backend infers it from `media`; if no media is uploaded, it uses `text`.
 
-If a caregiver uploads an image, audio, or video for an active observation, the backend analyzes the media before responding and stores a concise child-development observation in `observation`. If caregiver text is also supplied, the backend combines the text with the media analysis and stores one refined observation. Images are converted to a short visible-behavior observation. Audio and supported video/audio files are transcribed, then rewritten as an observation. This requires `OPENAI_API_KEY`; if AI conversion is unavailable, the backend keeps the supplied text or a fallback media-upload note.
+If a caregiver uploads an image, audio, or video for an active observation, the backend saves the media and returns quickly with `aiProcessing.status: "queued"`. Media analysis then runs in the background and updates the saved `observation`, `title`, `description`, `progress`, and `icon`. If caregiver text is also supplied, the background analysis combines the text with the media analysis into one refined observation. Images are converted to a short visible-behavior observation. Audio and supported video/audio files are transcribed, then rewritten as an observation. This requires `OPENAI_API_KEY`; if AI conversion is unavailable, the backend keeps the supplied text or a fallback media-upload note.
 
-For active observations, the backend generates/refines card display fields before responding: `title`, `description`, `progress`, and emoji-style `icon` such as `\uD83C\uDFE0` or `\uD83D\uDCAC`. Clients can inspect `aiProcessing.status` to see whether media analysis completed.
+For active text-only observations, the backend generates/refines card display fields before responding. For media observations, clients can poll `GET /observations/:observationId` and inspect `aiProcessing.status`; it changes from `queued` to `processing`, then `completed` or `failed`.
 
 Optional fields: `type`, `text`, `stage`, `indicatorId`, `mood`, `occurredAt`, `reaction`, `status`.
 

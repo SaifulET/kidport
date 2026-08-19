@@ -26,29 +26,35 @@ const ensureProfilePhoto = (file?: Express.Multer.File) => {
   if (file && !file.mimetype.startsWith('image/')) throw new AppError('Profile photo must be an image', 400);
 };
 
-profileRouter.get('/', asyncHandler(async (req, res) => ok(res, 'Profile', req.user)));
-
-profileRouter.get('/stats', asyncHandler(async (req, res) => {
-  const childIds = await AccessibleChildrenService.idsForUser(req.user!._id.toString());
+const caregiverStats = async (userId: string, authorId: unknown) => {
+  const childIds = await AccessibleChildrenService.idsForUser(userId);
   const activeAssociatedChildren = childIds.length;
   if (childIds.length === 0) {
-    ok(res, 'Caregiver stats', { totalObservations: 0, totalObservationsGiven: 0, totalMilestones: 0, associatedChildren: 0 });
-    return;
+    return { totalObservations: 0, totalObservationsGiven: 0, totalMilestones: 0, associatedChildren: 0 };
   }
 
   const filter = { childId: { $in: childIds }, status: 'active' };
   const [totalObservations, totalObservationsGiven, totalMilestones] = await Promise.all([
     Observation.countDocuments(filter),
-    Observation.countDocuments({ ...filter, authorId: req.user!._id }),
+    Observation.countDocuments({ ...filter, authorId }),
     Observation.countDocuments({ ...filter, isMilestone: true })
   ]);
 
-  ok(res, 'Caregiver stats', {
+  return {
     totalObservations,
     totalObservationsGiven,
     totalMilestones,
     associatedChildren: activeAssociatedChildren
-  });
+  };
+};
+
+profileRouter.get('/', asyncHandler(async (req, res) => {
+  const stats = await caregiverStats(req.user!._id.toString(), req.user!._id);
+  ok(res, 'Profile', { ...req.user!.toObject(), stats });
+}));
+
+profileRouter.get('/stats', asyncHandler(async (req, res) => {
+  ok(res, 'Caregiver stats', await caregiverStats(req.user!._id.toString(), req.user!._id));
 }));
 
 profileRouter.patch(

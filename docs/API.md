@@ -452,7 +452,13 @@ Response:
     "email": "jane@example.com",
     "profilePhoto": "https://kidport.s3.eu-north-1.amazonaws.com/users/66f.../profile/photo.jpg",
     "phoneNumber": "+15555555555",
-    "bio": "..."
+    "bio": "...",
+    "stats": {
+      "totalObservations": 127,
+      "totalObservationsGiven": 42,
+      "totalMilestones": 15,
+      "associatedChildren": 4
+    }
   }
 }
 ```
@@ -491,7 +497,7 @@ Possible errors: `400`, `503`
 
 Auth: required
 
-Returns dashboard card counts for the logged-in caregiver across all children they can access. `totalObservationsGiven` counts only observations authored by the logged-in caregiver.
+Returns dashboard card counts for the logged-in caregiver across all children they can access. This is also included as `stats` in `GET /profile`. `totalObservationsGiven` counts only observations authored by the logged-in caregiver.
 
 Response:
 

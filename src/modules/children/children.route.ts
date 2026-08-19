@@ -168,6 +168,47 @@ const childObservationAnalytics = async (childId: string, query: Record<string, 
   };
 };
 
+type DevelopmentReport = Awaited<ReturnType<typeof ReportService.developmentReport>>;
+type DomainReport = DevelopmentReport['domainReports'][number];
+type FlagToDiscuss = DevelopmentReport['flagsToDiscuss']['items'][number];
+
+const normalizeDomainName = (value?: string) => value?.trim().toLowerCase();
+
+const fallbackDomainGuidance = (domain: DomainReport) => {
+  const domainName = domain.domain.toLowerCase();
+  if (domain.observationCount === 0 || domain.status === 'not-enough-data') {
+    return `Add a few ${domainName} observations across different days so the guidance can reflect real patterns.`;
+  }
+  if (domain.status === 'needs-support') {
+    return `Use short, repeatable ${domainName} activities during daily routines and watch for small changes in confidence.`;
+  }
+  if (domain.status === 'improving') {
+    return `Continue the ${domainName} activities that are working, and add one slightly harder step when the child seems comfortable.`;
+  }
+  return null;
+};
+
+const domainGuidanceFromReport = (report: DevelopmentReport) => {
+  const flagsByDomain = report.flagsToDiscuss.items.reduce((map, flag) => {
+    const domainKey = normalizeDomainName(flag.domain);
+    if (!domainKey) return map;
+    map.set(domainKey, [...(map.get(domainKey) ?? []), flag]);
+    return map;
+  }, new Map<string, FlagToDiscuss[]>());
+
+  return report.domainReports.map((domain) => {
+    const domainKey = normalizeDomainName(domain.domain);
+    const flagGuidance = (domainKey ? flagsByDomain.get(domainKey) : undefined)?.map((flag) => flag.recommendation).filter(Boolean) ?? [];
+    const fallbackGuidance = fallbackDomainGuidance(domain);
+    const guidance = [...flagGuidance, ...(fallbackGuidance ? [fallbackGuidance] : [])];
+
+    return {
+      domain: domain.domain,
+      guidance: guidance.length > 0 ? guidance : null
+    };
+  });
+};
+
 const measurementSchema = z.union([
   z.coerce.number().positive(),
   z.object({ value: z.coerce.number().positive(), unit: z.string().optional(), measuredAt: z.coerce.date().optional() })
@@ -429,9 +470,7 @@ childrenRouter.post('/children/:childId/reports/:reportId/share', requireChildOw
 childrenRouter.get('/children/:childId/expert-guidance', requireChildAccess(), asyncHandler(async (req, res) => {
   const report = await ReportService.developmentReport(req.params.childId);
   ok(res, 'Expert guidance', {
-    disclaimer: 'This report is generated from caregiver-submitted observations and AI-assisted analysis. It is not a clinical diagnosis and should not replace professional pediatric evaluation.',
-    suggestions: report.positiveHighlights.items.map((item) => item.text),
-    questionsToDiscuss: report.recommendedQuestions.items.map((item) => item.question)
+    domainGuidance: domainGuidanceFromReport(report)
   });
 }));
 

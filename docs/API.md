@@ -2980,16 +2980,23 @@ Response:
   "success": true,
   "message": "Expert guidance",
   "data": {
-    "disclaimer": "This report is generated from caregiver-submitted observations and AI-assisted analysis. It is not a clinical diagnosis and should not replace professional pediatric evaluation.",
-    "suggestions": [
-      "Encourage naming familiar objects during play."
-    ],
-    "questionsToDiscuss": [
-      "Should we discuss expressive language progress at the next pediatric visit?"
+    "domainGuidance": [
+      {
+        "domain": "Language & Literacy",
+        "guidance": [
+          "Continue the language & literacy activities that are working, and add one slightly harder step when the child seems comfortable."
+        ]
+      },
+      {
+        "domain": "Motor",
+        "guidance": null
+      }
     ]
   }
 }
 ```
+
+`guidance` can contain multiple strings for one domain, or `null` when there is no current domain-specific guidance.
 
 ### GET `/expert-guidance`
 

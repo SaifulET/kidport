@@ -30,21 +30,24 @@ profileRouter.get('/', asyncHandler(async (req, res) => ok(res, 'Profile', req.u
 
 profileRouter.get('/stats', asyncHandler(async (req, res) => {
   const childIds = await AccessibleChildrenService.idsForUser(req.user!._id.toString());
+  const activeAssociatedChildren = childIds.length;
   if (childIds.length === 0) {
-    ok(res, 'Caregiver stats', { totalObservations: 0, totalMilestones: 0, associatedChildren: 0 });
+    ok(res, 'Caregiver stats', { totalObservations: 0, totalObservationsGiven: 0, totalMilestones: 0, associatedChildren: 0 });
     return;
   }
 
   const filter = { childId: { $in: childIds }, status: 'active' };
-  const [totalObservations, totalMilestones] = await Promise.all([
+  const [totalObservations, totalObservationsGiven, totalMilestones] = await Promise.all([
     Observation.countDocuments(filter),
+    Observation.countDocuments({ ...filter, authorId: req.user!._id }),
     Observation.countDocuments({ ...filter, isMilestone: true })
   ]);
 
   ok(res, 'Caregiver stats', {
     totalObservations,
+    totalObservationsGiven,
     totalMilestones,
-    associatedChildren: childIds.length
+    associatedChildren: activeAssociatedChildren
   });
 }));
 

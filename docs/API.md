@@ -491,7 +491,7 @@ Possible errors: `400`, `503`
 
 Auth: required
 
-Returns dashboard card counts for the logged-in caregiver across all children they can access.
+Returns dashboard card counts for the logged-in caregiver across all children they can access. `totalObservationsGiven` counts only observations authored by the logged-in caregiver.
 
 Response:
 
@@ -501,6 +501,7 @@ Response:
   "message": "Caregiver stats",
   "data": {
     "totalObservations": 127,
+    "totalObservationsGiven": 42,
     "totalMilestones": 15,
     "associatedChildren": 4
   }

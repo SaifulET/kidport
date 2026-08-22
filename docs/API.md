@@ -116,7 +116,8 @@ Response:
       "status": "active"
     },
     "accessToken": "jwt...",
-    "refreshToken": "opaque-refresh-token"
+    "refreshToken": "opaque-refresh-token",
+    "acceptedInvitationCount": 0
   }
 }
 ```
@@ -150,7 +151,8 @@ Response:
       "profilePhoto": "https://kidport.s3.eu-north-1.amazonaws.com/users/66f.../profile/photo.jpg"
     },
     "accessToken": "jwt...",
-    "refreshToken": "opaque-refresh-token"
+    "refreshToken": "opaque-refresh-token",
+    "acceptedInvitationCount": 0
   }
 }
 ```
@@ -1158,9 +1160,9 @@ Response:
 
 Notes:
 
-- Sending email does not grant access.
-- Access is granted only after explicit invitation acceptance.
-- Valid unregistered emails can receive invitations. After registering with that same email, the invitee can accept the invitation.
+- Sending email does not grant access until the invited caregiver registers/logs in or accepts the invitation link.
+- Valid unregistered emails can receive invitations.
+- Pending invitations for the same email are automatically accepted when that caregiver registers or logs in with the invited email, so they immediately see the invited child.
 - Invalid email formats are rejected with `Invalid email`.
 - A caregiver cannot invite their own email.
 - Duplicate active care-circle members or pending invitations are rejected.
@@ -1695,6 +1697,7 @@ Response:
 Notes:
 
 - The parent/caregiver controls assignment.
+- The daycare must already have an approved active daycare account.
 - The daycare does not gain active access until the invitation is accepted by an authorized daycare member.
 - A child can have only one pending or active invitation/assignment for the same daycare. Duplicate requests return `409`.
 

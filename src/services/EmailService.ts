@@ -19,12 +19,12 @@ export class EmailService {
     return { skipped: false };
   }
 
-  static careCircleInvite(to: string, token: string, message?: string) {
+  static careCircleInvite(to: string, token: string, childName: string, role: string, message?: string) {
     const url = `${env.FRONTEND_URL}/care-circle/invitations/${token}`;
     return this.sendMail(
       to,
-      'You are invited to join a child care circle',
-      `<p>You have been invited to Kidport.</p><p>${message ?? ''}</p><p><a href="${url}">Accept invitation</a></p>`
+      `You are invited for ${childName}`,
+      `<p>You are invited for ${childName} as a ${role}.</p><p>Please create an account or log in to see ${childName}'s progress.</p><p>${message ?? ''}</p><p><a href="${url}">View invitation</a></p>`
     );
   }
 

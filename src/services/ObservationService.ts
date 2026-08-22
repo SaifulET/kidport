@@ -398,6 +398,44 @@ export class ObservationService {
 }
 
 export class InvitationWorkflowService {
+  static async acceptPendingCareCircleInvitationsForUser(userId: string) {
+    const user = await User.findOne({ _id: userId, status: 'active' });
+    if (!user || user.userType !== 'caregiver') return [];
+
+    const invitations = await Invitation.find({
+      type: 'care_circle',
+      email: user.email,
+      status: 'pending',
+      expiresAt: { $gt: new Date() }
+    });
+
+    const accepted = [];
+    for (const invitation of invitations) {
+      await CareCircleMembership.updateOne(
+        { childId: invitation.childId, userId },
+        {
+          $set: {
+            childId: invitation.childId,
+            userId,
+            role: invitation.role ?? user.caregiverRole ?? 'parent',
+            relationship: invitation.relationship ?? invitation.role ?? 'caregiver',
+            invitedBy: invitation.invitedBy,
+            acceptedAt: new Date(),
+            status: 'active'
+          }
+        },
+        { upsert: true }
+      );
+      invitation.status = 'accepted';
+      invitation.acceptedBy = new Types.ObjectId(userId);
+      invitation.acceptedAt = new Date();
+      await invitation.save();
+      accepted.push(invitation);
+    }
+
+    return accepted;
+  }
+
   static async acceptCareCircleInvitation(tokenHash: string, userId: string) {
     const invitation = await Invitation.findOne({ tokenHash, type: 'care_circle', status: 'pending' });
     if (!invitation || invitation.expiresAt < new Date()) throw new AppError('Invitation is invalid or expired', 400);

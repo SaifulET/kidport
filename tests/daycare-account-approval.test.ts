@@ -8,6 +8,8 @@ import { Child } from '../src/modules/children/child.model';
 import { DaycareChildAssignment } from '../src/modules/daycare/daycare-child-assignment.model';
 import { Observation } from '../src/modules/observations/observation.model';
 import { TokenService } from '../src/services/TokenService';
+import { CareCircleMembership } from '../src/modules/care-circle/care-circle-membership.model';
+import { Daycare } from '../src/modules/daycare/daycare.model';
 
 let mongo: MongoMemoryServer;
 const app = createApp();
@@ -186,5 +188,67 @@ describe('daycare account approval', () => {
       totalObservations: 1,
       totalAssociatedChildren: 1
     });
+  });
+
+  it('auto-accepts pending care-circle invitations after invited parent registration', async () => {
+    const owner = await User.create({
+      fullName: 'Owner Parent',
+      email: 'owner@example.com',
+      passwordHash: 'hash',
+      userType: 'caregiver',
+      caregiverRole: 'parent'
+    });
+    const ownerToken = TokenService.signAccessToken(owner._id);
+    const child = await Child.create({ fullName: 'Mina Child', dateOfBirth: new Date('2021-01-01'), createdBy: owner._id });
+
+    await request(app)
+      .post(`/api/v1/children/${child._id}/care-circle/invite`)
+      .set('Authorization', `Bearer ${ownerToken}`)
+      .send({ email: 'newparent@example.com', role: 'parent' })
+      .expect(201);
+
+    const registration = await request(app)
+      .post('/api/v1/auth/register')
+      .send({
+        fullName: 'New Parent',
+        email: 'newparent@example.com',
+        password: 'strongPassword123',
+        identity: 'parent'
+      })
+      .expect(201);
+
+    expect(registration.body.data.acceptedInvitationCount).toBe(1);
+    const membership = await CareCircleMembership.findOne({
+      childId: child._id,
+      userId: registration.body.data.user._id,
+      status: 'active'
+    });
+    expect(membership?.role).toBe('parent');
+  });
+
+  it('does not allow invitations to daycares whose owner account is not approved', async () => {
+    const owner = await User.create({
+      fullName: 'Owner Parent',
+      email: 'owner@example.com',
+      passwordHash: 'hash',
+      userType: 'caregiver',
+      caregiverRole: 'parent'
+    });
+    const pendingDaycareOwner = await User.create({
+      fullName: 'Pending Daycare',
+      email: 'pending-daycare@example.com',
+      passwordHash: 'hash',
+      userType: 'daycare',
+      daycareRole: 'daycare_admin',
+      status: 'pending'
+    });
+    const daycare = await Daycare.create({ name: 'Pending Daycare', ownerId: pendingDaycareOwner._id, email: pendingDaycareOwner.email });
+    const child = await Child.create({ fullName: 'Mina Child', dateOfBirth: new Date('2021-01-01'), createdBy: owner._id });
+
+    await request(app)
+      .post(`/api/v1/children/${child._id}/daycare-invitations`)
+      .set('Authorization', `Bearer ${TokenService.signAccessToken(owner._id)}`)
+      .send({ daycareId: daycare._id })
+      .expect(403);
   });
 });

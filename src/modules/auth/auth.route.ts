@@ -14,6 +14,7 @@ import { validate } from '../../middlewares/validate';
 import { registerSchema, loginSchema, refreshSchema } from './auth.validation';
 import { EmailService } from '../../services/EmailService';
 import { DaycareAccountService } from '../../services/DaycareAccountService';
+import { InvitationWorkflowService } from '../../services/ObservationService';
 
 export const authRouter = Router();
 
@@ -40,9 +41,10 @@ authRouter.post(
     const passwordHash = await bcrypt.hash(req.body.password, 12);
     const user = await User.create({ fullName: req.body.fullName, email: req.body.email, passwordHash, ...identityToAccount(req.body.identity) });
     await UserSettings.create({ userId: user._id });
+    const acceptedInvitations = await InvitationWorkflowService.acceptPendingCareCircleInvitationsForUser(user._id.toString());
     const accessToken = TokenService.signAccessToken(user._id);
     const refreshToken = await TokenService.issueRefreshToken(user._id, { ip: req.ip, userAgent: req.get('user-agent') });
-    ok(res, 'Registration successful', { user, accessToken, refreshToken }, 201);
+    ok(res, 'Registration successful', { user, accessToken, refreshToken, acceptedInvitationCount: acceptedInvitations.length }, 201);
   })
 );
 
@@ -53,9 +55,10 @@ authRouter.post(
     const user = await User.findOne({ email: req.body.email });
     if (!user || !(await bcrypt.compare(req.body.password, user.passwordHash))) throw new AppError('Invalid email or password', 401);
     if (['disabled', 'deleted', 'rejected'].includes(user.status)) throw new AppError('Account is not available', 403);
+    const acceptedInvitations = await InvitationWorkflowService.acceptPendingCareCircleInvitationsForUser(user._id.toString());
     const accessToken = TokenService.signAccessToken(user._id);
     const refreshToken = await TokenService.issueRefreshToken(user._id, { ip: req.ip, userAgent: req.get('user-agent') });
-    ok(res, 'Login successful', { user, accessToken, refreshToken });
+    ok(res, 'Login successful', { user, accessToken, refreshToken, acceptedInvitationCount: acceptedInvitations.length });
   })
 );
 

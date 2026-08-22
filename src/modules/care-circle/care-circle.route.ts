@@ -10,6 +10,7 @@ import { randomToken, hashToken } from '../../utils/crypto';
 import { EmailService } from '../../services/EmailService';
 import { InvitationWorkflowService } from '../../services/ObservationService';
 import { User } from '../users/user.model';
+import { Child } from '../children/child.model';
 import { CareCircleMembership } from './care-circle-membership.model';
 import { Invitation } from './invitation.model';
 
@@ -29,6 +30,8 @@ careCircleRouter.post(
     const email = req.body.email.toLowerCase().trim();
     if (!z.string().email().safeParse(email).success) throw new AppError('Invalid email', 400);
     if (email === req.user!.email) throw new AppError('You cannot invite your own email', 400);
+    const child = await Child.findById(req.params.childId);
+    if (!child) throw new AppError('Child not found', 404);
 
     const invitedUser = await User.findOne({ email, status: 'active' });
     if (invitedUser) {
@@ -56,7 +59,7 @@ careCircleRouter.post(
       message: req.body.message,
       expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
     });
-    void EmailService.careCircleInvite(email, token, req.body.message).catch((error) => {
+    void EmailService.careCircleInvite(email, token, child.fullName, req.body.role, req.body.message).catch((error) => {
       console.error('Failed to send care circle invitation email', error);
     });
     ok(res, 'Care circle invitation queued', { invitationId: invitation._id, emailStatus: 'queued' }, 201);

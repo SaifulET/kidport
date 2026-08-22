@@ -20,6 +20,7 @@ import { StorageService } from '../../services/StorageService';
 import { SocialResponseService } from '../../services/SocialResponseService';
 import { Child } from './child.model';
 import { CareCircleMembership } from '../care-circle/care-circle-membership.model';
+import { User } from '../users/user.model';
 import { Daycare } from '../daycare/daycare.model';
 import { DaycareChildAssignment } from '../daycare/daycare-child-assignment.model';
 import { Invitation } from '../care-circle/invitation.model';
@@ -505,9 +506,11 @@ childrenRouter.post(
   requireChildOwner(),
   validate(z.object({ body: z.object({ daycareId: z.string(), email: z.string().email().optional(), message: z.string().optional() }) })),
   asyncHandler(async (req, res) => {
-    const daycare = await Daycare.findById(req.body.daycareId);
+    const daycare = await Daycare.findOne({ _id: req.body.daycareId, status: 'active' });
     const child = await Child.findById(req.params.childId);
     if (!daycare || !child) throw new Error('Daycare or child not found');
+    const daycareOwner = await User.findOne({ _id: daycare.ownerId, userType: 'daycare', status: 'active' });
+    if (!daycareOwner) throw new AppError('Daycare account must be approved before invitation', 403);
 
     const existingAssignment = await DaycareChildAssignment.findOne({
       childId: req.params.childId,

@@ -135,6 +135,12 @@ describe('daycare account approval', () => {
       .send({ daycareId: approval.body.data.daycare._id })
       .expect(409);
 
+    const daycareInvitations = await request(app)
+      .get('/api/v1/daycare/invitations')
+      .set('Authorization', `Bearer ${daycareToken}`)
+      .expect(200);
+    expect(daycareInvitations.body.data).toHaveLength(1);
+
     const unassignedBeforePlacement = await request(app)
       .get('/api/v1/daycare/children/unassigned')
       .set('Authorization', `Bearer ${daycareToken}`)
@@ -182,6 +188,12 @@ describe('daycare account approval', () => {
 
     const activeAssignment = await DaycareChildAssignment.findOne({ childId: child._id, daycareId: approval.body.data.daycare._id });
     expect(activeAssignment?.status).toBe('active');
+
+    const daycareInvitationsAfterPlacement = await request(app)
+      .get('/api/v1/daycare/invitations')
+      .set('Authorization', `Bearer ${daycareToken}`)
+      .expect(200);
+    expect(daycareInvitationsAfterPlacement.body.data).toHaveLength(0);
 
     await Observation.create({
       childId: child._id,

@@ -117,6 +117,20 @@ daycareRouter.get('/daycare/stats', requireDaycareAccount, asyncHandler(async (r
   });
 }));
 
+daycareRouter.get('/daycare/invitations', requireDaycareAccount, asyncHandler(async (req, res) => {
+  const daycare = await DaycareAccountService.getApprovedOwnerDaycare(req.user!);
+  const invitations = await Invitation.find({
+    type: 'daycare_child_assignment',
+    daycareId: daycare._id,
+    status: 'pending'
+  })
+    .populate('childId', 'fullName nickname profilePhoto dateOfBirth gender')
+    .populate('invitedBy', 'fullName email profilePhoto caregiverRole')
+    .sort({ createdAt: -1 });
+
+  ok(res, 'Daycare invitations', invitations);
+}));
+
 daycareRouter.post(
   '/daycares',
   requireDaycareAccount,

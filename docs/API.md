@@ -1312,6 +1312,35 @@ Response:
 }
 ```
 
+### GET `/daycare/invitations`
+
+Auth: required, approved daycare account required
+
+Returns all pending parent invitations for the authenticated daycare user's own daycare. Use this as the daycare invitation inbox. The daycare is resolved from the bearer token.
+
+Response:
+
+```json
+{
+  "success": true,
+  "message": "Daycare invitations",
+  "data": [
+    {
+      "_id": "66f...",
+      "type": "daycare_child_assignment",
+      "childId": {
+        "_id": "66f...",
+        "fullName": "Ava Child"
+      },
+      "daycareId": "66f...",
+      "email": "admin@sunflower.example",
+      "status": "pending",
+      "expiresAt": "2026-08-29T00:00:00.000Z"
+    }
+  ]
+}
+```
+
 ### POST `/daycares`
 
 Auth: required, approved daycare account required

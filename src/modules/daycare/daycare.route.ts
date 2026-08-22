@@ -21,6 +21,7 @@ daycareRouter.use(requireAuth);
 const memberRoleSchema = z.enum(['daycare_admin', 'daycare_employee']);
 const memberStatusSchema = z.enum(['pending', 'active', 'removed', 'rejected']);
 const memberClassroomIdsSchema = z.array(z.string()).optional();
+const unassignedClassroomFilter = { $or: [{ classroomId: { $exists: false } }, { classroomId: null }] };
 
 const requireDaycareAccount = asyncHandler(async (req, _res, next) => {
   if (req.user!.userType !== 'daycare') throw new AppError('Only daycare accounts can manage daycare information', 403);
@@ -264,7 +265,7 @@ daycareRouter.get('/daycares/:daycareId/children/unassigned', requireDaycareAcce
   const assignments = await DaycareChildAssignment.find({
     daycareId: req.params.daycareId,
     status: { $in: ['pending', 'active'] },
-    classroomId: { $exists: false }
+    ...unassignedClassroomFilter
   }).populate('childId');
   ok(res, 'Unassigned daycare children', assignments);
 }));
@@ -274,7 +275,7 @@ daycareRouter.get('/daycare/children/unassigned', requireDaycareAccount, asyncHa
   const assignments = await DaycareChildAssignment.find({
     daycareId: daycare._id,
     status: { $in: ['pending', 'active'] },
-    classroomId: { $exists: false }
+    ...unassignedClassroomFilter
   }).populate('childId');
   ok(res, 'Unassigned daycare children', assignments);
 }));

@@ -1769,6 +1769,7 @@ Response:
 Auth: required, approved daycare account required
 
 Returns active assigned children and pending daycare-invited children for the authenticated daycare user's own daycare that are not yet placed in a classroom.
+After a parent sends a daycare invitation, the child appears here immediately with `status: "pending"`.
 
 Response:
 

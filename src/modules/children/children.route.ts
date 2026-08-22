@@ -538,7 +538,7 @@ childrenRouter.post(
     });
     await DaycareChildAssignment.updateOne(
       { childId: req.params.childId, daycareId: req.body.daycareId },
-      { $set: { assignedBy: req.user!._id, status: 'pending' } },
+      { $set: { assignedBy: req.user!._id, status: 'pending' }, $unset: { classroomId: '' } },
       { upsert: true }
     );
     if (invitation.email) {

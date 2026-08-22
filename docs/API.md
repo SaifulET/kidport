@@ -1165,6 +1165,7 @@ Notes:
 - Pending invitations for the same email are automatically accepted when that caregiver registers or logs in with the invited email, so they immediately see the invited child.
 - Invalid email formats are rejected with `Invalid email`.
 - A caregiver cannot invite their own email.
+- Daycare roles are rejected here. Use `/children/:childId/daycare-invitations` for daycare invitations.
 - Duplicate active care-circle members or pending invitations are rejected.
 - Only the account matching the invited email can accept the invitation link.
 
@@ -1709,6 +1710,8 @@ Request body:
   "message": "Please review Ava's daycare assignment."
 }
 ```
+
+Send either `daycareId` or an approved daycare account email. If `daycareId` is omitted, `email` is used to find the approved daycare.
 
 Response:
 

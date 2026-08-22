@@ -505,9 +505,20 @@ childrenRouter.patch('/children/:childId/profile-photo', requireChildOwner(), up
 childrenRouter.post(
   '/children/:childId/daycare-invitations',
   requireChildOwner(),
-  validate(z.object({ body: z.object({ daycareId: z.string(), email: z.string().email().optional(), message: z.string().optional() }) })),
+  validate(z.object({
+    body: z
+      .object({ daycareId: z.string().optional(), email: z.string().email().optional(), message: z.string().optional() })
+      .refine((body) => Boolean(body.daycareId || body.email), 'daycareId or email is required')
+  })),
   asyncHandler(async (req, res) => {
-    const daycare = await Daycare.findOne({ _id: req.body.daycareId, status: 'active' });
+    const invitedEmail = req.body.email?.toLowerCase().trim();
+    const daycareOwnerByEmail = invitedEmail ? await User.findOne({ email: invitedEmail, userType: 'daycare', status: 'active' }) : null;
+    const daycare = req.body.daycareId
+      ? await Daycare.findOne({ _id: req.body.daycareId, status: 'active' })
+      : await Daycare.findOne({
+          status: 'active',
+          $or: [{ email: invitedEmail }, ...(daycareOwnerByEmail ? [{ ownerId: daycareOwnerByEmail._id }] : [])]
+        });
     const child = await Child.findById(req.params.childId);
     if (!daycare || !child) throw new Error('Daycare or child not found');
     const daycareOwner = await User.findOne({ _id: daycare.ownerId, userType: 'daycare', status: 'active' });
@@ -518,7 +529,7 @@ childrenRouter.post(
 
     const existingAssignment = await DaycareChildAssignment.findOne({
       childId: req.params.childId,
-      daycareId: req.body.daycareId,
+      daycareId: daycare._id,
       status: { $in: ['pending', 'active'] }
     });
     if (existingAssignment) throw new AppError('This child is already invited or assigned to this daycare', 409);
@@ -526,7 +537,7 @@ childrenRouter.post(
     const pendingInvitation = await Invitation.findOne({
       type: 'daycare_child_assignment',
       childId: req.params.childId,
-      daycareId: req.body.daycareId,
+      daycareId: daycare._id,
       status: 'pending',
       expiresAt: { $gt: new Date() }
     });
@@ -536,15 +547,15 @@ childrenRouter.post(
     const invitation = await Invitation.create({
       type: 'daycare_child_assignment',
       tokenHash: hashToken(token),
-      email: req.body.email ?? daycare.email ?? 'unconfigured-daycare-email@kidport.local',
+      email: invitedEmail ?? daycare.email ?? daycareOwner.email,
       childId: req.params.childId,
-      daycareId: req.body.daycareId,
+      daycareId: daycare._id,
       invitedBy: req.user!._id,
       message: req.body.message,
       expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
     });
     await DaycareChildAssignment.updateOne(
-      { childId: req.params.childId, daycareId: req.body.daycareId },
+      { childId: req.params.childId, daycareId: daycare._id },
       { $set: { assignedBy: req.user!._id, status: 'pending' }, $unset: { classroomId: '' } },
       { upsert: true }
     );

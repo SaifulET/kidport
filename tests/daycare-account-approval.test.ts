@@ -124,9 +124,15 @@ describe('daycare account approval', () => {
     const parentToken = TokenService.signAccessToken(parent._id);
 
     await request(app)
+      .post(`/api/v1/children/${child._id}/care-circle/invite`)
+      .set('Authorization', `Bearer ${parentToken}`)
+      .send({ email: 'owner@sunflower.example', role: 'daycare' })
+      .expect(400);
+
+    await request(app)
       .post(`/api/v1/children/${child._id}/daycare-invitations`)
       .set('Authorization', `Bearer ${parentToken}`)
-      .send({ daycareId: approval.body.data.daycare._id })
+      .send({ email: 'owner@sunflower.example' })
       .expect(201);
 
     await request(app)

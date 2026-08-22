@@ -30,6 +30,9 @@ careCircleRouter.post(
     const email = req.body.email.toLowerCase().trim();
     if (!z.string().email().safeParse(email).success) throw new AppError('Invalid email', 400);
     if (email === req.user!.email) throw new AppError('You cannot invite your own email', 400);
+    if (['daycare', 'daycare_admin', 'daycare_employee'].includes(req.body.role)) {
+      throw new AppError('Use daycare invitation API for daycare invitations', 400);
+    }
     const child = await Child.findById(req.params.childId);
     if (!child) throw new AppError('Child not found', 404);
 

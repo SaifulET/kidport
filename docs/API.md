@@ -97,6 +97,8 @@ Request body:
 
 `identity`: `mother`, `father`, `parent`, `nanny`, `daycare`
 
+Caregiver accounts are created with `status: "active"`. Daycare accounts are created with `status: "pending"` and can log in, but cannot create daycare profiles, classrooms, or access daycare children until a platform admin approves the account.
+
 Response:
 
 ```json
@@ -153,7 +155,141 @@ Response:
 }
 ```
 
-Possible errors: `400`, `401`
+Possible errors: `400`, `401`, `403`
+
+### POST `/auth/admin/register`
+
+Auth: none; creates the first platform admin only
+
+Request body:
+
+```json
+{
+  "fullName": "Platform Admin",
+  "email": "admin@kidport.example",
+  "password": "strongPassword123"
+}
+```
+
+Response:
+
+```json
+{
+  "success": true,
+  "message": "Admin registration successful",
+  "data": {
+    "user": {
+      "_id": "66f...",
+      "fullName": "Platform Admin",
+      "email": "admin@kidport.example",
+      "userType": "admin",
+      "status": "active"
+    },
+    "accessToken": "jwt...",
+    "refreshToken": "opaque-refresh-token"
+  }
+}
+```
+
+### POST `/auth/admin/login`
+
+Auth: none
+
+Request body:
+
+```json
+{
+  "email": "admin@kidport.example",
+  "password": "strongPassword123"
+}
+```
+
+Response:
+
+```json
+{
+  "success": true,
+  "message": "Admin login successful",
+  "data": {
+    "user": {
+      "_id": "66f...",
+      "fullName": "Platform Admin",
+      "email": "admin@kidport.example",
+      "userType": "admin",
+      "status": "active"
+    },
+    "accessToken": "jwt...",
+    "refreshToken": "opaque-refresh-token"
+  }
+}
+```
+
+### GET `/auth/admin/daycare-accounts`
+
+Auth: required, platform admin required
+
+Optional query:
+
+`status`: `pending` (default), `active`, `disabled`, or `rejected`
+
+Response:
+
+```json
+{
+  "success": true,
+  "message": "Daycare accounts",
+  "data": [
+    {
+      "_id": "66f...",
+      "fullName": "Sunflower Owner",
+      "email": "owner@sunflower.example",
+      "userType": "daycare",
+      "daycareRole": "daycare_admin",
+      "status": "pending"
+    }
+  ]
+}
+```
+
+### POST `/auth/admin/daycare-accounts/:userId/approve`
+
+Auth: required, platform admin required
+
+Approves a pending daycare account. After approval, the daycare user can create their daycare profile and perform daycare-admin actions.
+
+Response:
+
+```json
+{
+  "success": true,
+  "message": "Daycare account approved",
+  "data": {
+    "_id": "66f...",
+    "userType": "daycare",
+    "status": "active"
+  }
+}
+```
+
+### POST `/auth/admin/daycare-accounts/:userId/reject`
+
+Auth: required, platform admin required
+
+Rejects a pending daycare account.
+
+Response:
+
+```json
+{
+  "success": true,
+  "message": "Daycare account rejected",
+  "data": {
+    "_id": "66f...",
+    "userType": "daycare",
+    "status": "rejected"
+  }
+}
+```
 
 ### POST `/auth/refresh-token`
 
@@ -1065,7 +1201,7 @@ Possible errors: `400`, `403`
 
 ## Daycares
 
-Parents/caregivers can list and view active daycares so they can send child assignment invitations. Only daycare accounts can create daycare records. Only the daycare owner can update or delete their daycare information.
+Parents/caregivers can list and view active daycares so they can send child assignment invitations. Only approved daycare accounts can create daycare records. Only the daycare owner can update or delete their daycare information.
 
 ### GET `/daycares`
 
@@ -1095,7 +1231,7 @@ Response:
 
 ### POST `/daycares`
 
-Auth: required, daycare account required
+Auth: required, approved daycare account required
 
 Request body:
 
@@ -1220,6 +1356,10 @@ Response:
 
 Auth: required, daycare admin required
 
+Optional query:
+
+`status`: `active` (default), `pending`, `removed`, or `rejected`
+
 Response:
 
 ```json
@@ -1227,6 +1367,84 @@ Response:
   "success": true,
   "message": "Daycare members",
   "data": []
+}
+```
+
+### POST `/daycares/:daycareId/member-requests`
+
+Auth: required
+
+Creates a pending daycare employee request for the authenticated user. Pending members do not have daycare or child access until a daycare admin approves them.
+
+Request body:
+
+```json
+{
+  "classroomIds": ["66f..."]
+}
+```
+
+Response:
+
+```json
+{
+  "success": true,
+  "message": "Daycare member request submitted",
+  "data": {
+    "_id": "66f...",
+    "daycareId": "66f...",
+    "userId": "66f...",
+    "role": "daycare_employee",
+    "status": "pending"
+  }
+}
+```
+
+### POST `/daycares/:daycareId/members/:memberId/approve`
+
+Auth: required, daycare admin required
+
+Approves a pending daycare member request. Optionally sets the final role or classroom list while approving.
+
+Request body:
+
+```json
+{
+  "role": "daycare_employee",
+  "classroomIds": ["66f..."]
+}
+```
+
+Response:
+
+```json
+{
+  "success": true,
+  "message": "Daycare member approved",
+  "data": {
+    "_id": "66f...",
+    "role": "daycare_employee",
+    "status": "active"
+  }
+}
+```
+
+### POST `/daycares/:daycareId/members/:memberId/reject`
+
+Auth: required, daycare admin required
+
+Rejects a pending daycare member request.
+
+Response:
+
+```json
+{
+  "success": true,
+  "message": "Daycare member request rejected",
+  "data": {
+    "_id": "66f...",
+    "status": "rejected"
+  }
 }
 ```
 

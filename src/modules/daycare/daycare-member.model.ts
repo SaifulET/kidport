@@ -7,7 +7,7 @@ const daycareMemberSchema = new Schema(
     userId: { type: Schema.Types.ObjectId, ref: 'User', required: true, index: true },
     role: { type: String, enum: DAYCARE_ROLES, required: true },
     classroomIds: [{ type: Schema.Types.ObjectId, ref: 'Classroom' }],
-    status: { type: String, enum: ['active', 'removed'], default: 'active', index: true }
+    status: { type: String, enum: ['pending', 'active', 'removed', 'rejected'], default: 'active', index: true }
   },
   { timestamps: true }
 );

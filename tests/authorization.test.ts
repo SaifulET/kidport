@@ -65,6 +65,27 @@ describe('AuthorizationService child access', () => {
     expect(access?.child._id.toString()).toBe(child._id.toString());
   });
 
+  it('does not allow pending daycare members to access or manage daycare records', async () => {
+    const admin = await makeUser('admin@example.com');
+    const staff = await makeUser('staff@example.com');
+    const daycare = await Daycare.create({ name: 'Sunflower', ownerId: admin._id });
+    const member = await DaycareMember.create({
+      daycareId: daycare._id,
+      userId: staff._id,
+      role: 'daycare_employee',
+      status: 'pending'
+    });
+
+    await expect(AuthorizationService.canAccessDaycare(staff._id.toString(), daycare._id.toString())).resolves.toBeNull();
+    await expect(AuthorizationService.canManageDaycare(staff._id.toString(), daycare._id.toString())).resolves.toBe(false);
+
+    member.status = 'active';
+    await member.save();
+
+    await expect(AuthorizationService.canAccessDaycare(staff._id.toString(), daycare._id.toString())).resolves.toBeTruthy();
+    await expect(AuthorizationService.canManageDaycare(staff._id.toString(), daycare._id.toString())).resolves.toBe(false);
+  });
+
   it('represents classroom assignment only for an already assigned child', async () => {
     const owner = await makeUser('owner@example.com');
     const staff = await makeUser('staff@example.com');

@@ -22,7 +22,7 @@ const userSchema = new Schema(
     phoneNumber: String,
     bio: String,
     profilePhoto: mediaSchema,
-    status: { type: String, enum: ['active', 'disabled', 'deleted'], default: 'active', index: true },
+    status: { type: String, enum: ['pending', 'active', 'disabled', 'rejected', 'deleted'], default: 'active', index: true },
     passwordResetTokenHash: String,
     passwordResetExpiresAt: Date,
     emailVerifiedAt: Date,
@@ -35,6 +35,9 @@ const userSchema = new Schema(
 const transformProfilePhoto = (_doc: unknown, ret: Record<string, unknown>) => {
   const profilePhoto = ret.profilePhoto as { url?: string } | string | undefined;
   ret.profilePhoto = typeof profilePhoto === 'string' ? profilePhoto : profilePhoto?.url ?? null;
+  delete ret.passwordHash;
+  delete ret.passwordResetTokenHash;
+  delete ret.passwordResetExpiresAt;
   return ret;
 };
 

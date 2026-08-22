@@ -14,7 +14,7 @@ export const requireAuth = async (req: Request, _res: Response, next: NextFuncti
     const payload = jwt.verify(header.slice(7), env.JWT_ACCESS_SECRET) as AccessPayload;
     if (payload.type !== 'access') throw new Error('Invalid token type');
     const user = await User.findById(payload.sub);
-    if (!user || user.status !== 'active') return next(new AppError('Authentication required', 401));
+    if (!user || ['disabled', 'rejected', 'deleted'].includes(user.status)) return next(new AppError('Authentication required', 401));
     req.user = user;
     next();
   } catch {

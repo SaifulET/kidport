@@ -15,13 +15,19 @@ import { DaycareChildAssignment } from './daycare-child-assignment.model';
 export const daycareRouter = Router();
 daycareRouter.use(requireAuth);
 
+const memberRoleSchema = z.enum(['daycare_admin', 'daycare_employee']);
+const memberStatusSchema = z.enum(['pending', 'active', 'removed', 'rejected']);
+const memberClassroomIdsSchema = z.array(z.string()).optional();
+
 const requireDaycareAccount = asyncHandler(async (req, _res, next) => {
   if (req.user!.userType !== 'daycare') throw new AppError('Only daycare accounts can manage daycare information', 403);
+  if (req.user!.status !== 'active') throw new AppError('Account approval required', 403);
   next();
 });
 
 const requireDaycareOwner = asyncHandler(async (req, _res, next) => {
   if (req.user!.userType !== 'daycare') throw new AppError('Only daycare accounts can manage daycare information', 403);
+  if (req.user!.status !== 'active') throw new AppError('Account approval required', 403);
   const daycare = await Daycare.findOne({ _id: req.params.daycareId, status: { $ne: 'deleted' } });
   if (!daycare) throw new AppError('Daycare not found', 404);
   if (daycare.ownerId.toString() !== req.user!._id.toString()) throw new AppError('Only the daycare owner can manage this daycare', 403);
@@ -65,7 +71,7 @@ daycareRouter.delete('/daycares/:daycareId', requireDaycareOwner, asyncHandler(a
 daycareRouter.post(
   '/daycares/:daycareId/members',
   requireDaycareAdmin(),
-  validate(z.object({ body: z.object({ userId: z.string(), role: z.enum(['daycare_admin', 'daycare_employee']), classroomIds: z.array(z.string()).optional() }) })),
+  validate(z.object({ body: z.object({ userId: z.string(), role: memberRoleSchema, classroomIds: memberClassroomIdsSchema }) })),
   asyncHandler(async (req, res) => {
     const member = await DaycareMember.findOneAndUpdate(
       { daycareId: req.params.daycareId, userId: req.body.userId },
@@ -76,8 +82,74 @@ daycareRouter.post(
   })
 );
 
-daycareRouter.get('/daycares/:daycareId/members', requireDaycareAdmin(), asyncHandler(async (req, res) => {
-  ok(res, 'Daycare members', await DaycareMember.find({ daycareId: req.params.daycareId, status: 'active' }).populate('userId', 'fullName email daycareRole'));
+daycareRouter.post(
+  '/daycares/:daycareId/member-requests',
+  validate(z.object({ body: z.object({ classroomIds: memberClassroomIdsSchema }).optional() })),
+  asyncHandler(async (req, res) => {
+    const daycare = await Daycare.findOne({ _id: req.params.daycareId, status: 'active' });
+    if (!daycare) throw new AppError('Daycare not found', 404);
+
+    const existing = await DaycareMember.findOne({ daycareId: req.params.daycareId, userId: req.user!._id });
+    if (existing?.status === 'active') throw new AppError('You are already an active daycare member', 409);
+
+    const member = await DaycareMember.findOneAndUpdate(
+      { daycareId: req.params.daycareId, userId: req.user!._id },
+      {
+        $set: {
+          role: 'daycare_employee',
+          classroomIds: req.body?.classroomIds ?? [],
+          status: 'pending'
+        }
+      },
+      { upsert: true, new: true }
+    );
+
+    ok(res, 'Daycare member request submitted', member, 201);
+  })
+);
+
+daycareRouter.get(
+  '/daycares/:daycareId/members',
+  requireDaycareAdmin(),
+  validate(z.object({ query: z.object({ status: memberStatusSchema.default('active') }) })),
+  asyncHandler(async (req, res) => {
+    ok(
+      res,
+      'Daycare members',
+      await DaycareMember.find({ daycareId: req.params.daycareId, status: req.query.status }).populate('userId', 'fullName email daycareRole')
+    );
+  })
+);
+
+daycareRouter.post(
+  '/daycares/:daycareId/members/:memberId/approve',
+  requireDaycareAdmin(),
+  validate(z.object({ body: z.object({ role: memberRoleSchema.optional(), classroomIds: memberClassroomIdsSchema }).optional() })),
+  asyncHandler(async (req, res) => {
+    const member = await DaycareMember.findOneAndUpdate(
+      { _id: req.params.memberId, daycareId: req.params.daycareId, status: 'pending' },
+      {
+        $set: {
+          ...(req.body?.role ? { role: req.body.role } : {}),
+          ...(req.body?.classroomIds ? { classroomIds: req.body.classroomIds } : {}),
+          status: 'active'
+        }
+      },
+      { new: true }
+    );
+    if (!member) throw new AppError('Pending daycare member request not found', 404);
+    ok(res, 'Daycare member approved', member);
+  })
+);
+
+daycareRouter.post('/daycares/:daycareId/members/:memberId/reject', requireDaycareAdmin(), asyncHandler(async (req, res) => {
+  const member = await DaycareMember.findOneAndUpdate(
+    { _id: req.params.memberId, daycareId: req.params.daycareId, status: 'pending' },
+    { $set: { status: 'rejected' } },
+    { new: true }
+  );
+  if (!member) throw new AppError('Pending daycare member request not found', 404);
+  ok(res, 'Daycare member request rejected', member);
 }));
 
 daycareRouter.patch('/daycares/:daycareId/members/:memberId', requireDaycareAdmin(), asyncHandler(async (req, res) => {

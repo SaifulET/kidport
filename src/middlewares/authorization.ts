@@ -23,6 +23,7 @@ export const requireChildOwner = (paramName = 'childId') => async (req: Request,
 
 export const requireDaycareAccess = (paramName = 'daycareId') => async (req: Request, _res: Response, next: NextFunction) => {
   if (!req.user) return next(new AppError('Authentication required', 401));
+  if (req.user.status !== 'active') return next(new AppError('Account approval required', 403));
   const member = await AuthorizationService.canAccessDaycare(req.user._id.toString(), req.params[paramName]);
   if (!member) return next(new AppError('You do not have access to this daycare', 403));
   next();
@@ -30,7 +31,20 @@ export const requireDaycareAccess = (paramName = 'daycareId') => async (req: Req
 
 export const requireDaycareAdmin = (paramName = 'daycareId') => async (req: Request, _res: Response, next: NextFunction) => {
   if (!req.user) return next(new AppError('Authentication required', 401));
+  if (req.user.status !== 'active') return next(new AppError('Account approval required', 403));
   const allowed = await AuthorizationService.canManageDaycare(req.user._id.toString(), req.params[paramName]);
   if (!allowed) return next(new AppError('Daycare administrator permission required', 403));
+  next();
+};
+
+export const requireActiveAccount = async (req: Request, _res: Response, next: NextFunction) => {
+  if (!req.user) return next(new AppError('Authentication required', 401));
+  if (req.user.status !== 'active') return next(new AppError('Account approval required', 403));
+  next();
+};
+
+export const requirePlatformAdmin = async (req: Request, _res: Response, next: NextFunction) => {
+  if (!req.user) return next(new AppError('Authentication required', 401));
+  if (req.user.userType !== 'admin' || req.user.status !== 'active') return next(new AppError('Platform administrator permission required', 403));
   next();
 };

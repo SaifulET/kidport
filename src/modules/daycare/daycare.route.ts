@@ -261,12 +261,20 @@ daycareRouter.get('/daycare-invitations/:token/accept', acceptDaycareInvitation)
 daycareRouter.post('/daycare-invitations/:token/accept', acceptDaycareInvitation);
 
 daycareRouter.get('/daycares/:daycareId/children/unassigned', requireDaycareAccess(), asyncHandler(async (req, res) => {
-  const assignments = await DaycareChildAssignment.find({ daycareId: req.params.daycareId, status: 'active', classroomId: { $exists: false } }).populate('childId');
+  const assignments = await DaycareChildAssignment.find({
+    daycareId: req.params.daycareId,
+    status: { $in: ['pending', 'active'] },
+    classroomId: { $exists: false }
+  }).populate('childId');
   ok(res, 'Unassigned daycare children', assignments);
 }));
 
 daycareRouter.get('/daycare/children/unassigned', requireDaycareAccount, asyncHandler(async (req, res) => {
   const daycare = await DaycareAccountService.getApprovedOwnerDaycare(req.user!);
-  const assignments = await DaycareChildAssignment.find({ daycareId: daycare._id, status: 'active', classroomId: { $exists: false } }).populate('childId');
+  const assignments = await DaycareChildAssignment.find({
+    daycareId: daycare._id,
+    status: { $in: ['pending', 'active'] },
+    classroomId: { $exists: false }
+  }).populate('childId');
   ok(res, 'Unassigned daycare children', assignments);
 }));

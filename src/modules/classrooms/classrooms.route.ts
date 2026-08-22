@@ -97,9 +97,16 @@ classroomsRouter.post('/classrooms/:classroomId/children/:childId', asyncHandler
   if (!classroom) throw new AppError('Classroom not found', 404);
   const member = await import('../../services/AuthorizationService').then((m) => m.AuthorizationService.canAccessDaycare(req.user!._id.toString(), classroom.daycareId.toString()));
   if (!member) throw new AppError('You do not have access to this daycare', 403);
-  const assignment = await DaycareChildAssignment.findOne({ childId: req.params.childId, daycareId: classroom.daycareId, status: 'active' });
+  const assignment = await DaycareChildAssignment.findOne({
+    childId: req.params.childId,
+    daycareId: classroom.daycareId,
+    status: { $in: ['pending', 'active'] }
+  });
   if (!assignment) throw new AppError('Child must be assigned to this daycare before classroom placement', 403);
   assignment.classroomId = classroom._id;
+  assignment.status = 'active';
+  assignment.acceptedBy = req.user!._id;
+  assignment.acceptedAt = new Date();
   await assignment.save();
   await Child.updateOne({ _id: req.params.childId }, { $set: { daycare: classroom.daycareId, classroom: classroom._id } });
   ok(res, 'Child assigned to classroom', assignment);
@@ -114,7 +121,7 @@ classroomsRouter.post('/classroom/:classroomId/children', validate(classroomChil
   const assignments = await DaycareChildAssignment.find({
     daycareId: daycare._id,
     childId: { $in: childIds },
-    status: 'active'
+    status: { $in: ['pending', 'active'] }
   });
 
   const assignedChildIds = new Set(assignments.map((assignment) => assignment.childId.toString()));
@@ -124,8 +131,8 @@ classroomsRouter.post('/classroom/:classroomId/children', validate(classroomChil
   }
 
   await DaycareChildAssignment.updateMany(
-    { daycareId: daycare._id, childId: { $in: childIds }, status: 'active' },
-    { $set: { classroomId: classroom._id } }
+    { daycareId: daycare._id, childId: { $in: childIds }, status: { $in: ['pending', 'active'] } },
+    { $set: { classroomId: classroom._id, status: 'active', acceptedBy: req.user!._id, acceptedAt: new Date() } }
   );
   await Child.updateMany(
     { _id: { $in: childIds }, status: { $ne: 'deleted' } },

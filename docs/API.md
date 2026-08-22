@@ -1742,6 +1742,8 @@ Response:
 
 Auth: required, daycare member required
 
+Returns active assigned children and pending daycare-invited children that are not yet placed in a classroom.
+
 Response:
 
 ```json
@@ -1766,7 +1768,7 @@ Response:
 
 Auth: required, approved daycare account required
 
-Returns unassigned children for the authenticated daycare user's own daycare.
+Returns active assigned children and pending daycare-invited children for the authenticated daycare user's own daycare that are not yet placed in a classroom.
 
 Response:
 
@@ -1982,6 +1984,7 @@ Possible error:
 Auth: required, approved daycare account required
 
 Assigns one or more active, unassigned daycare children to a classroom owned by the authenticated daycare. The daycare is resolved from the bearer token.
+Pending daycare invitations are accepted automatically when the daycare places the child into a classroom.
 
 Request body:
 

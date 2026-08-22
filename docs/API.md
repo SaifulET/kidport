@@ -1175,6 +1175,11 @@ Auth: required, child owner required
 
 Single invitation API. Send `daycareId` to invite an approved daycare, or send `email` and `role` to invite a parent/caregiver.
 
+For daycare invitations, `daycareId` may be either:
+
+- the approved daycare account/user `_id` returned by login/admin approval
+- the daycare profile `_id` returned as `daycareId` from `/auth/me`
+
 Daycare request body:
 
 ```json
@@ -1743,6 +1748,8 @@ Response:
 Auth: required, child owner required
 
 Compatibility endpoint for daycare invitations. New clients should use `POST /children/:childId/invitations`.
+
+`daycareId` may be either the approved daycare account/user `_id` or the daycare profile `_id`.
 
 Request body:
 

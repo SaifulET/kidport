@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { Types } from 'mongoose';
 import { z } from 'zod';
 import { requireAuth } from '../../middlewares/auth';
 import { requireChildAccess, requireChildOwner } from '../../middlewares/authorization';
@@ -104,17 +105,31 @@ const queueCareCircleInvitation = async (input: {
   return { invitationId: invitation._id, emailStatus: 'queued', type: 'care_circle' };
 };
 
-const queueDaycareInvitation = async (input: { childId: string; daycareId: string; message?: string; invitedById: string }) => {
-  const daycare = await Daycare.findOne({ _id: input.daycareId, status: 'active' });
-  const child = await Child.findById(input.childId);
-  if (!daycare || !child) throw new Error('Daycare or child not found');
+const resolveApprovedDaycare = async (daycareIdOrOwnerId: string) => {
+  if (!Types.ObjectId.isValid(daycareIdOrOwnerId)) throw new AppError('Valid daycareId is required', 400);
 
-  const daycareOwner = await User.findOne({ _id: daycare.ownerId, userType: 'daycare', status: 'active' });
-  if (daycareOwner) await DaycareAccountService.ensureOwnerDaycare(daycareOwner);
-  const daycareAdmin = daycareOwner
-    ? await DaycareMember.findOne({ daycareId: daycare._id, userId: daycareOwner._id, role: 'daycare_admin', status: 'active' })
-    : null;
-  if (!daycareOwner || !daycareAdmin) throw new AppError('Daycare account must be approved before invitation', 403);
+  const daycare = await Daycare.findOne({ _id: daycareIdOrOwnerId, status: 'active' });
+  if (daycare) {
+    const daycareOwner = await User.findOne({ _id: daycare.ownerId, userType: 'daycare', status: 'active' });
+    if (!daycareOwner) throw new AppError('Daycare account must be approved before invitation', 403);
+    await DaycareAccountService.ensureOwnerDaycare(daycareOwner);
+    const daycareAdmin = await DaycareMember.findOne({ daycareId: daycare._id, userId: daycareOwner._id, role: 'daycare_admin', status: 'active' });
+    if (!daycareAdmin) throw new AppError('Daycare account must be approved before invitation', 403);
+    return { daycare, daycareOwner };
+  }
+
+  const daycareOwner = await User.findOne({ _id: daycareIdOrOwnerId, userType: 'daycare' });
+  if (!daycareOwner) throw new AppError('Daycare not found', 404);
+  if (daycareOwner.status !== 'active') throw new AppError('Daycare account must be approved before invitation', 403);
+
+  const ownerDaycare = await DaycareAccountService.ensureOwnerDaycare(daycareOwner);
+  return { daycare: ownerDaycare, daycareOwner };
+};
+
+const queueDaycareInvitation = async (input: { childId: string; daycareId: string; message?: string; invitedById: string }) => {
+  const { daycare, daycareOwner } = await resolveApprovedDaycare(input.daycareId);
+  const child = await Child.findById(input.childId);
+  if (!child) throw new AppError('Child not found', 404);
 
   const existingAssignment = await DaycareChildAssignment.findOne({
     childId: input.childId,

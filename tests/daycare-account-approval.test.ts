@@ -132,7 +132,7 @@ describe('daycare account approval', () => {
     await request(app)
       .post(`/api/v1/children/${child._id}/invitations`)
       .set('Authorization', `Bearer ${parentToken}`)
-      .send({ daycareId: approval.body.data.daycare._id })
+      .send({ daycareId: approval.body.data.user._id })
       .expect(201);
 
     await request(app)

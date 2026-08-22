@@ -142,6 +142,21 @@ describe('daycare account approval', () => {
     expect(unassignedBeforePlacement.body.data).toHaveLength(1);
     expect(unassignedBeforePlacement.body.data[0].status).toBe('pending');
 
+    await DaycareChildAssignment.deleteOne({ childId: child._id, daycareId: approval.body.data.daycare._id });
+
+    const invitationOnlyUnassigned = await request(app)
+      .get('/api/v1/daycare/children/unassigned')
+      .set('Authorization', `Bearer ${daycareToken}`)
+      .expect(200);
+    expect(invitationOnlyUnassigned.body.data).toHaveLength(1);
+    expect(invitationOnlyUnassigned.body.data[0].source).toBe('invitation');
+
+    await DaycareChildAssignment.updateOne(
+      { childId: child._id, daycareId: approval.body.data.daycare._id },
+      { $set: { assignedBy: parent._id, status: 'pending' }, $unset: { classroomId: '' } },
+      { upsert: true }
+    );
+
     await DaycareChildAssignment.updateOne(
       { childId: child._id, daycareId: approval.body.data.daycare._id },
       { $set: { classroomId: null } }

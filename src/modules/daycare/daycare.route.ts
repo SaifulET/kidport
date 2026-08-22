@@ -15,6 +15,7 @@ import { DaycareChildAssignment } from './daycare-child-assignment.model';
 import { Classroom } from '../classrooms/classroom.model';
 import { Observation } from '../observations/observation.model';
 import { User } from '../users/user.model';
+import { Invitation } from '../care-circle/invitation.model';
 
 export const daycareRouter = Router();
 daycareRouter.use(requireAuth);
@@ -24,6 +25,12 @@ const memberStatusSchema = z.enum(['pending', 'active', 'removed', 'rejected']);
 const memberClassroomIdsSchema = z.array(z.string()).optional();
 const unassignedClassroomFilter = { $or: [{ classroomId: { $exists: false } }, { classroomId: null }] };
 
+const childIdString = (record: { childId?: unknown }) => {
+  const childId = record.childId as { _id?: unknown; toString?: () => string } | undefined;
+  const raw = childId && typeof childId === 'object' && '_id' in childId ? childId._id : childId;
+  return raw?.toString?.();
+};
+
 const approvedDaycareIds = async () => {
   const activeOwnerIds = await User.find({ userType: 'daycare', status: 'active' }).distinct('_id');
   return DaycareMember.find({
@@ -31,6 +38,42 @@ const approvedDaycareIds = async () => {
     role: 'daycare_admin',
     status: 'active'
   }).distinct('daycareId');
+};
+
+const unassignedChildrenForDaycare = async (daycareId: unknown) => {
+  const [assignments, invitations] = await Promise.all([
+    DaycareChildAssignment.find({
+      daycareId,
+      status: { $in: ['pending', 'active'] },
+      ...unassignedClassroomFilter
+    }).populate('childId').lean(),
+    Invitation.find({
+      type: 'daycare_child_assignment',
+      daycareId,
+      status: 'pending',
+      expiresAt: { $gt: new Date() }
+    }).populate('childId').lean()
+  ]);
+
+  const assignmentChildIds = new Set(assignments.map(childIdString).filter(Boolean));
+  const invitationChildren = invitations
+    .filter((invitation) => {
+      const invitedChildId = childIdString(invitation);
+      return invitedChildId && !assignmentChildIds.has(invitedChildId);
+    })
+    .map((invitation) => ({
+      _id: invitation._id,
+      invitationId: invitation._id,
+      childId: invitation.childId,
+      daycareId: invitation.daycareId,
+      status: 'pending',
+      source: 'invitation',
+      expiresAt: invitation.expiresAt,
+      createdAt: invitation.createdAt,
+      updatedAt: invitation.updatedAt
+    }));
+
+  return [...assignments, ...invitationChildren];
 };
 
 const requireDaycareAccount = asyncHandler(async (req, _res, next) => {
@@ -272,20 +315,10 @@ daycareRouter.get('/daycare-invitations/:token/accept', acceptDaycareInvitation)
 daycareRouter.post('/daycare-invitations/:token/accept', acceptDaycareInvitation);
 
 daycareRouter.get('/daycares/:daycareId/children/unassigned', requireDaycareAccess(), asyncHandler(async (req, res) => {
-  const assignments = await DaycareChildAssignment.find({
-    daycareId: req.params.daycareId,
-    status: { $in: ['pending', 'active'] },
-    ...unassignedClassroomFilter
-  }).populate('childId');
-  ok(res, 'Unassigned daycare children', assignments);
+  ok(res, 'Unassigned daycare children', await unassignedChildrenForDaycare(req.params.daycareId));
 }));
 
 daycareRouter.get('/daycare/children/unassigned', requireDaycareAccount, asyncHandler(async (req, res) => {
   const daycare = await DaycareAccountService.getApprovedOwnerDaycare(req.user!);
-  const assignments = await DaycareChildAssignment.find({
-    daycareId: daycare._id,
-    status: { $in: ['pending', 'active'] },
-    ...unassignedClassroomFilter
-  }).populate('childId');
-  ok(res, 'Unassigned daycare children', assignments);
+  ok(res, 'Unassigned daycare children', await unassignedChildrenForDaycare(daycare._id));
 }));

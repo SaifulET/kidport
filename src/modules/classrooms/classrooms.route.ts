@@ -11,6 +11,7 @@ import { Classroom } from './classroom.model';
 import { DaycareChildAssignment } from '../daycare/daycare-child-assignment.model';
 import { Child } from '../children/child.model';
 import { DaycareAccountService } from '../../services/DaycareAccountService';
+import { Invitation } from '../care-circle/invitation.model';
 
 export const classroomsRouter = Router();
 classroomsRouter.use(requireAuth);
@@ -108,6 +109,10 @@ classroomsRouter.post('/classrooms/:classroomId/children/:childId', asyncHandler
   assignment.acceptedBy = req.user!._id;
   assignment.acceptedAt = new Date();
   await assignment.save();
+  await Invitation.updateOne(
+    { type: 'daycare_child_assignment', childId: req.params.childId, daycareId: classroom.daycareId, status: 'pending' },
+    { $set: { status: 'accepted', acceptedBy: req.user!._id, acceptedAt: new Date() } }
+  );
   await Child.updateOne({ _id: req.params.childId }, { $set: { daycare: classroom.daycareId, classroom: classroom._id } });
   ok(res, 'Child assigned to classroom', assignment);
 }));
@@ -133,6 +138,10 @@ classroomsRouter.post('/classroom/:classroomId/children', validate(classroomChil
   await DaycareChildAssignment.updateMany(
     { daycareId: daycare._id, childId: { $in: childIds }, status: { $in: ['pending', 'active'] } },
     { $set: { classroomId: classroom._id, status: 'active', acceptedBy: req.user!._id, acceptedAt: new Date() } }
+  );
+  await Invitation.updateMany(
+    { type: 'daycare_child_assignment', daycareId: daycare._id, childId: { $in: childIds }, status: 'pending' },
+    { $set: { status: 'accepted', acceptedBy: req.user!._id, acceptedAt: new Date() } }
   );
   await Child.updateMany(
     { _id: { $in: childIds }, status: { $ne: 'deleted' } },

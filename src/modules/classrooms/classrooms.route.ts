@@ -9,6 +9,7 @@ import { AppError } from '../../utils/AppError';
 import { Classroom } from './classroom.model';
 import { DaycareChildAssignment } from '../daycare/daycare-child-assignment.model';
 import { Child } from '../children/child.model';
+import { Daycare } from '../daycare/daycare.model';
 
 export const classroomsRouter = Router();
 classroomsRouter.use(requireAuth);
@@ -25,6 +26,22 @@ const classroomSchema = z.object({
     status: z.enum(['active', 'archived']).optional()
   })
 });
+
+const getOwnedDaycareForApprovedUser = async (user: Express.Request['user']) => {
+  if (!user) throw new AppError('Authentication required', 401);
+  if (user.userType !== 'daycare') throw new AppError('Only daycare accounts can create classrooms', 403);
+  if (user.status !== 'active') throw new AppError('Account approval required', 403);
+
+  const daycare = await Daycare.findOne({ ownerId: user._id, status: 'active' }).sort({ createdAt: -1 });
+  if (!daycare) throw new AppError('Create your daycare profile before creating classrooms', 404);
+  return daycare;
+};
+
+classroomsRouter.post('/classroom', validate(classroomSchema), asyncHandler(async (req, res) => {
+  const daycare = await getOwnedDaycareForApprovedUser(req.user);
+  const classroom = await Classroom.create({ ...req.body, daycareId: daycare._id });
+  ok(res, 'Classroom created', classroom, 201);
+}));
 
 classroomsRouter.post('/daycares/:daycareId/classrooms', requireDaycareAdmin(), validate(classroomSchema), asyncHandler(async (req, res) => {
   const classroom = await Classroom.create({ ...req.body, daycareId: req.params.daycareId });

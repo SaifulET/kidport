@@ -49,6 +49,12 @@ describe('daycare account approval', () => {
       .send({ name: 'Sunflower Learning Center' })
       .expect(403);
 
+    await request(app)
+      .post('/api/v1/classroom')
+      .set('Authorization', `Bearer ${daycareToken}`)
+      .send({ name: 'Toddlers' })
+      .expect(403);
+
     const adminRegistration = await request(app)
       .post('/api/v1/auth/admin/register')
       .send({
@@ -71,10 +77,18 @@ describe('daycare account approval', () => {
       .set('Authorization', `Bearer ${adminToken}`)
       .expect(200);
 
-    await request(app)
+    const daycare = await request(app)
       .post('/api/v1/daycares')
       .set('Authorization', `Bearer ${daycareToken}`)
       .send({ name: 'Sunflower Learning Center' })
       .expect(201);
+
+    const classroom = await request(app)
+      .post('/api/v1/classroom')
+      .set('Authorization', `Bearer ${daycareToken}`)
+      .send({ name: 'Toddlers', capacity: 12 })
+      .expect(201);
+
+    expect(classroom.body.data.daycareId).toBe(daycare.body.data._id);
   });
 });

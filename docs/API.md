@@ -1586,6 +1586,50 @@ Response:
 
 ## Classrooms
 
+### POST `/classroom`
+
+Auth: required, approved daycare account required
+
+Creates a classroom for the authenticated daycare user's own active daycare. Do not send `daycareId`; the API assigns it from the daycare profile owned by the logged-in user.
+
+Request body:
+
+```json
+{
+  "name": "Sunflower Room",
+  "icon": "sunflower",
+  "theme": "yellow",
+  "ageBand": "18-36 months",
+  "leadTeacher": "66f...",
+  "description": "Toddler classroom",
+  "capacity": 12,
+  "status": "active"
+}
+```
+
+Response:
+
+```json
+{
+  "success": true,
+  "message": "Classroom created",
+  "data": {
+    "_id": "66f...",
+    "daycareId": "66f...",
+    "name": "Sunflower Room",
+    "icon": "sunflower",
+    "theme": "yellow",
+    "ageBand": "18-36 months",
+    "leadTeacher": "66f...",
+    "description": "Toddler classroom",
+    "capacity": 12,
+    "status": "active"
+  }
+}
+```
+
+Possible errors: `401`, `403` if the daycare account is not approved, `404` if the daycare profile has not been created yet.
+
 ### POST `/daycares/:daycareId/classrooms`
 
 Auth: required, daycare admin required

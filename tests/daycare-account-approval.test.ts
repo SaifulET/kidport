@@ -3,6 +3,10 @@ import { MongoMemoryServer } from 'mongodb-memory-server';
 import request from 'supertest';
 import { beforeAll, beforeEach, afterAll, describe, expect, it } from 'vitest';
 import { createApp } from '../src/app';
+import { User } from '../src/modules/users/user.model';
+import { Child } from '../src/modules/children/child.model';
+import { DaycareChildAssignment } from '../src/modules/daycare/daycare-child-assignment.model';
+import { Observation } from '../src/modules/observations/observation.model';
 
 let mongo: MongoMemoryServer;
 const app = createApp();
@@ -105,5 +109,40 @@ describe('daycare account approval', () => {
       .expect(200);
 
     expect(classrooms.body.data).toHaveLength(1);
+
+    const parent = await User.create({
+      fullName: 'Ava Parent',
+      email: 'parent@example.com',
+      passwordHash: 'hash',
+      userType: 'caregiver',
+      caregiverRole: 'parent'
+    });
+    const child = await Child.create({ fullName: 'Ava Child', dateOfBirth: new Date('2022-01-01'), createdBy: parent._id });
+    await DaycareChildAssignment.create({
+      childId: child._id,
+      daycareId: approval.body.data.daycare._id,
+      assignedBy: parent._id,
+      status: 'active'
+    });
+    await Observation.create({
+      childId: child._id,
+      authorId: daycareRegistration.body.data.user._id,
+      daycareId: approval.body.data.daycare._id,
+      type: 'text',
+      text: 'Ava stacked blocks.',
+      status: 'active'
+    });
+
+    const stats = await request(app)
+      .get('/api/v1/daycare/stats')
+      .set('Authorization', `Bearer ${daycareToken}`)
+      .expect(200);
+
+    expect(stats.body.data).toMatchObject({
+      daycareId: approval.body.data.daycare._id,
+      totalClassrooms: 1,
+      totalObservations: 1,
+      totalAssociatedChildren: 1
+    });
   });
 });

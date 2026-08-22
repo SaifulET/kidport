@@ -12,6 +12,8 @@ import { DaycareAccountService } from '../../services/DaycareAccountService';
 import { Daycare } from './daycare.model';
 import { DaycareMember } from './daycare-member.model';
 import { DaycareChildAssignment } from './daycare-child-assignment.model';
+import { Classroom } from '../classrooms/classroom.model';
+import { Observation } from '../observations/observation.model';
 
 export const daycareRouter = Router();
 daycareRouter.use(requireAuth);
@@ -43,6 +45,22 @@ daycareRouter.get('/daycares', asyncHandler(async (_req, res) => {
 daycareRouter.get('/daycare', requireDaycareAccount, asyncHandler(async (req, res) => {
   const daycare = await DaycareAccountService.getApprovedOwnerDaycare(req.user!);
   ok(res, 'Daycare', daycare);
+}));
+
+daycareRouter.get('/daycare/stats', requireDaycareAccount, asyncHandler(async (req, res) => {
+  const daycare = await DaycareAccountService.getApprovedOwnerDaycare(req.user!);
+  const [totalClassrooms, totalObservations, associatedChildIds] = await Promise.all([
+    Classroom.countDocuments({ daycareId: daycare._id, status: 'active' }),
+    Observation.countDocuments({ daycareId: daycare._id, status: 'active' }),
+    DaycareChildAssignment.find({ daycareId: daycare._id, status: 'active' }).distinct('childId')
+  ]);
+
+  ok(res, 'Daycare stats', {
+    daycareId: daycare._id,
+    totalClassrooms,
+    totalObservations,
+    totalAssociatedChildren: associatedChildIds.length
+  });
 }));
 
 daycareRouter.post(

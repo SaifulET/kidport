@@ -1289,6 +1289,27 @@ Response:
 }
 ```
 
+### GET `/daycare/stats`
+
+Auth: required, approved daycare account required
+
+Returns dashboard totals for the authenticated daycare user's own daycare. The daycare is resolved from the bearer token.
+
+Response:
+
+```json
+{
+  "success": true,
+  "message": "Daycare stats",
+  "data": {
+    "daycareId": "66f...",
+    "totalClassrooms": 4,
+    "totalObservations": 128,
+    "totalAssociatedChildren": 32
+  }
+}
+```
+
 ### POST `/daycares`
 
 Auth: required, approved daycare account required

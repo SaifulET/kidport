@@ -130,9 +130,9 @@ describe('daycare account approval', () => {
       .expect(400);
 
     await request(app)
-      .post(`/api/v1/children/${child._id}/daycare-invitations`)
+      .post(`/api/v1/children/${child._id}/invitations`)
       .set('Authorization', `Bearer ${parentToken}`)
-      .send({ email: 'owner@sunflower.example' })
+      .send({ daycareId: approval.body.data.daycare._id })
       .expect(201);
 
     await request(app)
@@ -152,7 +152,7 @@ describe('daycare account approval', () => {
       .set('Authorization', `Bearer ${daycareToken}`)
       .expect(200);
     expect(unassignedBeforePlacement.body.data).toHaveLength(1);
-    expect(unassignedBeforePlacement.body.data[0].status).toBe('pending');
+    expect(unassignedBeforePlacement.body.data[0].status).toBe('active');
 
     await DaycareChildAssignment.deleteOne({ childId: child._id, daycareId: approval.body.data.daycare._id });
 
@@ -165,7 +165,7 @@ describe('daycare account approval', () => {
 
     await DaycareChildAssignment.updateOne(
       { childId: child._id, daycareId: approval.body.data.daycare._id },
-      { $set: { assignedBy: parent._id, status: 'pending' }, $unset: { classroomId: '' } },
+      { $set: { assignedBy: parent._id, status: 'active' }, $unset: { classroomId: '' } },
       { upsert: true }
     );
 
@@ -235,7 +235,7 @@ describe('daycare account approval', () => {
     const child = await Child.create({ fullName: 'Mina Child', dateOfBirth: new Date('2021-01-01'), createdBy: owner._id });
 
     await request(app)
-      .post(`/api/v1/children/${child._id}/care-circle/invite`)
+      .post(`/api/v1/children/${child._id}/invitations`)
       .set('Authorization', `Bearer ${ownerToken}`)
       .send({ email: 'newparent@example.com', role: 'parent' })
       .expect(201);
@@ -295,10 +295,20 @@ describe('daycare account approval', () => {
     pendingDaycareOwner.status = 'active';
     await pendingDaycareOwner.save();
 
+    const staleOwner = await User.create({
+      fullName: 'Stale Daycare',
+      email: 'stale-daycare@example.com',
+      passwordHash: 'hash',
+      userType: 'daycare',
+      daycareRole: 'daycare_admin',
+      status: 'pending'
+    });
+    await Daycare.create({ name: 'Stale Duplicate', ownerId: staleOwner._id, email: pendingDaycareOwner.email });
+
     await request(app)
-      .post(`/api/v1/children/${child._id}/daycare-invitations`)
+      .post(`/api/v1/children/${child._id}/invitations`)
       .set('Authorization', `Bearer ${ownerToken}`)
-      .send({ email: pendingDaycareOwner.email })
+      .send({ daycareId: daycare._id })
       .expect(201);
   });
 });

@@ -1165,9 +1165,50 @@ Notes:
 - Pending invitations for the same email are automatically accepted when that caregiver registers or logs in with the invited email, so they immediately see the invited child.
 - Invalid email formats are rejected with `Invalid email`.
 - A caregiver cannot invite their own email.
-- Daycare roles are rejected here. Use `/children/:childId/daycare-invitations` for daycare invitations.
+- Daycare roles are rejected here. Use `/children/:childId/invitations` with `daycareId` for daycare invitations.
 - Duplicate active care-circle members or pending invitations are rejected.
 - Only the account matching the invited email can accept the invitation link.
+
+### POST `/children/:childId/invitations`
+
+Auth: required, child owner required
+
+Single invitation API. Send `daycareId` to invite an approved daycare, or send `email` and `role` to invite a parent/caregiver.
+
+Daycare request body:
+
+```json
+{
+  "daycareId": "66f...",
+  "message": "Please review Ava's daycare assignment."
+}
+```
+
+Parent/caregiver request body:
+
+```json
+{
+  "email": "parent@example.com",
+  "role": "parent",
+  "message": "Please join Ava's care circle."
+}
+```
+
+Response:
+
+```json
+{
+  "success": true,
+  "message": "Daycare invitation queued",
+  "data": {
+    "invitationId": "66f...",
+    "emailStatus": "queued",
+    "type": "daycare_child_assignment"
+  }
+}
+```
+
+For parent/caregiver invitations, `type` is `care_circle`.
 
 ### PATCH `/children/:childId/care-circle/:memberId`
 
@@ -1317,7 +1358,7 @@ Response:
 
 Auth: required, approved daycare account required
 
-Returns all pending parent invitations for the authenticated daycare user's own daycare. Use this as the daycare invitation inbox. The daycare is resolved from the bearer token.
+Returns pending parent invitation notifications for the authenticated daycare user's own daycare. Use this as the daycare invitation inbox. The daycare is resolved from the bearer token. Daycare does not need to accept these invitations; invited children are available immediately in the unassigned children list.
 
 Response:
 
@@ -1701,17 +1742,16 @@ Response:
 
 Auth: required, child owner required
 
+Compatibility endpoint for daycare invitations. New clients should use `POST /children/:childId/invitations`.
+
 Request body:
 
 ```json
 {
   "daycareId": "66f...",
-  "email": "admin@sunflower.example",
   "message": "Please review Ava's daycare assignment."
 }
 ```
-
-Send either `daycareId` or an approved daycare account email. If `daycareId` is omitted, `email` is used to find the approved daycare.
 
 Response:
 
@@ -1730,7 +1770,7 @@ Notes:
 
 - The parent/caregiver controls assignment.
 - The daycare must already have an approved active daycare account.
-- The daycare does not gain active access until the invitation is accepted by an authorized daycare member.
+- The child becomes available to the daycare immediately as an active unassigned daycare child. The daycare does not need to accept the invitation.
 - A child can have only one pending or active invitation/assignment for the same daycare. Duplicate requests return `409`.
 
 ### GET `/daycare-invitations/:token`
@@ -1777,7 +1817,7 @@ Response:
 
 Auth: required, daycare member required
 
-Returns active assigned children and pending daycare-invited children that are not yet placed in a classroom.
+Returns daycare children that are not yet placed in a classroom.
 
 Response:
 
@@ -1803,8 +1843,8 @@ Response:
 
 Auth: required, approved daycare account required
 
-Returns active assigned children and pending daycare-invited children for the authenticated daycare user's own daycare that are not yet placed in a classroom.
-After a parent sends a daycare invitation, the child appears here immediately with `status: "pending"`.
+Returns daycare children for the authenticated daycare user's own daycare that are not yet placed in a classroom.
+After a parent sends a daycare invitation, the child appears here immediately with `status: "active"`.
 If an older invitation exists without a matching assignment row, it is returned with `source: "invitation"` and `invitationId`.
 
 Response:
@@ -2021,7 +2061,7 @@ Possible error:
 Auth: required, approved daycare account required
 
 Assigns one or more active, unassigned daycare children to a classroom owned by the authenticated daycare. The daycare is resolved from the bearer token.
-Pending daycare invitations are accepted automatically when the daycare places the child into a classroom.
+Pending daycare invitation notifications are closed automatically when the daycare places the child into a classroom.
 
 Request body:
 

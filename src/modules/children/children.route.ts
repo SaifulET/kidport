@@ -42,6 +42,119 @@ const queryString = (value: unknown) => {
   return typeof stringValue === 'string' ? stringValue.trim() : undefined;
 };
 
+const childInvitationSchema = z.object({
+  body: z
+    .object({
+      daycareId: z.string().optional(),
+      email: z.string().email().optional(),
+      role: z.string().optional(),
+      message: z.string().optional()
+    })
+    .refine((body) => Boolean(body.daycareId) !== Boolean(body.email), 'Send either daycareId or email')
+    .refine((body) => Boolean(body.daycareId || body.role), 'role is required for parent invitations')
+});
+
+const queueCareCircleInvitation = async (input: {
+  childId: string;
+  email: string;
+  role: string;
+  message?: string;
+  invitedById: string;
+  invitedByEmail: string;
+}) => {
+  const email = input.email.toLowerCase().trim();
+  if (email === input.invitedByEmail) throw new AppError('You cannot invite your own email', 400);
+  if (['daycare', 'daycare_admin', 'daycare_employee'].includes(input.role)) {
+    throw new AppError('Use daycareId for daycare invitations', 400);
+  }
+
+  const child = await Child.findById(input.childId);
+  if (!child) throw new AppError('Child not found', 404);
+
+  const invitedUser = await User.findOne({ email, status: 'active' });
+  if (invitedUser) {
+    const existingMember = await CareCircleMembership.findOne({ childId: input.childId, userId: invitedUser._id, status: 'active' });
+    if (existingMember) throw new AppError('This caregiver is already in the care circle', 409);
+  }
+
+  const pendingInvitation = await Invitation.findOne({
+    type: 'care_circle',
+    childId: input.childId,
+    email,
+    status: 'pending',
+    expiresAt: { $gt: new Date() }
+  });
+  if (pendingInvitation) throw new AppError('A pending invitation already exists for this email', 409);
+
+  const token = randomToken();
+  const invitation = await Invitation.create({
+    type: 'care_circle',
+    tokenHash: hashToken(token),
+    email,
+    childId: input.childId,
+    invitedBy: input.invitedById,
+    role: input.role,
+    message: input.message,
+    expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
+  });
+  void EmailService.careCircleInvite(email, token, child.fullName, input.role, input.message).catch((error) => {
+    console.error('Failed to send care circle invitation email', error);
+  });
+
+  return { invitationId: invitation._id, emailStatus: 'queued', type: 'care_circle' };
+};
+
+const queueDaycareInvitation = async (input: { childId: string; daycareId: string; message?: string; invitedById: string }) => {
+  const daycare = await Daycare.findOne({ _id: input.daycareId, status: 'active' });
+  const child = await Child.findById(input.childId);
+  if (!daycare || !child) throw new Error('Daycare or child not found');
+
+  const daycareOwner = await User.findOne({ _id: daycare.ownerId, userType: 'daycare', status: 'active' });
+  if (daycareOwner) await DaycareAccountService.ensureOwnerDaycare(daycareOwner);
+  const daycareAdmin = daycareOwner
+    ? await DaycareMember.findOne({ daycareId: daycare._id, userId: daycareOwner._id, role: 'daycare_admin', status: 'active' })
+    : null;
+  if (!daycareOwner || !daycareAdmin) throw new AppError('Daycare account must be approved before invitation', 403);
+
+  const existingAssignment = await DaycareChildAssignment.findOne({
+    childId: input.childId,
+    daycareId: daycare._id,
+    status: { $in: ['pending', 'active'] }
+  });
+  if (existingAssignment) throw new AppError('This child is already invited or assigned to this daycare', 409);
+
+  const pendingInvitation = await Invitation.findOne({
+    type: 'daycare_child_assignment',
+    childId: input.childId,
+    daycareId: daycare._id,
+    status: 'pending',
+    expiresAt: { $gt: new Date() }
+  });
+  if (pendingInvitation) throw new AppError('A pending daycare invitation already exists for this child and daycare', 409);
+
+  const token = randomToken();
+  const invitation = await Invitation.create({
+    type: 'daycare_child_assignment',
+    tokenHash: hashToken(token),
+    email: daycare.email ?? daycareOwner.email,
+    childId: input.childId,
+    daycareId: daycare._id,
+    invitedBy: input.invitedById,
+    message: input.message,
+    expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
+  });
+  await DaycareChildAssignment.updateOne(
+    { childId: input.childId, daycareId: daycare._id },
+    { $set: { assignedBy: input.invitedById, status: 'active', acceptedAt: new Date() }, $unset: { classroomId: '', acceptedBy: '' } },
+    { upsert: true }
+  );
+  void EmailService.daycareInvite(invitation.email, token, child.fullName).catch((error) => {
+    console.error('Failed to send daycare invitation email', error);
+  });
+
+  return { invitationId: invitation._id, emailStatus: 'queued', type: 'daycare_child_assignment' };
+};
+
 const applyObservationFilters = async (filter: Record<string, unknown>, query: Record<string, unknown>) => {
   const domain = queryString(query.domainName) ?? queryString(query.domain) ?? queryString(query.domainId);
   const keyword = queryString(query.keyword) ?? queryString(query.stage);
@@ -504,71 +617,41 @@ childrenRouter.patch('/children/:childId/profile-photo', requireChildOwner(), up
 }));
 
 childrenRouter.post(
+  '/children/:childId/invitations',
+  requireChildOwner(),
+  validate(childInvitationSchema),
+  asyncHandler(async (req, res) => {
+    const data = req.body.daycareId
+      ? await queueDaycareInvitation({
+          childId: req.params.childId,
+          daycareId: req.body.daycareId,
+          message: req.body.message,
+          invitedById: req.user!._id.toString()
+        })
+      : await queueCareCircleInvitation({
+          childId: req.params.childId,
+          email: req.body.email as string,
+          role: req.body.role as string,
+          message: req.body.message,
+          invitedById: req.user!._id.toString(),
+          invitedByEmail: req.user!.email
+        });
+
+    ok(res, data.type === 'daycare_child_assignment' ? 'Daycare invitation queued' : 'Care circle invitation queued', data, 201);
+  })
+);
+
+childrenRouter.post(
   '/children/:childId/daycare-invitations',
   requireChildOwner(),
-  validate(z.object({
-    body: z
-      .object({ daycareId: z.string().optional(), email: z.string().email().optional(), message: z.string().optional() })
-      .refine((body) => Boolean(body.daycareId || body.email), 'daycareId or email is required')
-  })),
+  validate(z.object({ body: z.object({ daycareId: z.string(), message: z.string().optional() }) })),
   asyncHandler(async (req, res) => {
-    const invitedEmail = req.body.email?.toLowerCase().trim();
-    const daycareOwnerByEmail = invitedEmail ? await User.findOne({ email: invitedEmail, userType: 'daycare', status: 'active' }) : null;
-    let daycare = req.body.daycareId
-      ? await Daycare.findOne({ _id: req.body.daycareId, status: 'active' })
-      : await Daycare.findOne({
-          status: 'active',
-          $or: [{ email: invitedEmail }, ...(daycareOwnerByEmail ? [{ ownerId: daycareOwnerByEmail._id }] : [])]
-        });
-    const child = await Child.findById(req.params.childId);
-    if (!daycare && daycareOwnerByEmail) daycare = await DaycareAccountService.ensureOwnerDaycare(daycareOwnerByEmail);
-    if (!daycare || !child) throw new Error('Daycare or child not found');
-    const daycareOwner = daycareOwnerByEmail?._id.toString() === daycare.ownerId.toString()
-      ? daycareOwnerByEmail
-      : await User.findOne({ _id: daycare.ownerId, userType: 'daycare', status: 'active' });
-    if (daycareOwner) daycare = await DaycareAccountService.ensureOwnerDaycare(daycareOwner);
-    const daycareAdmin = daycareOwner
-      ? await DaycareMember.findOne({ daycareId: daycare._id, userId: daycareOwner._id, role: 'daycare_admin', status: 'active' })
-      : null;
-    if (!daycareOwner || !daycareAdmin) throw new AppError('Daycare account must be approved before invitation', 403);
-
-    const existingAssignment = await DaycareChildAssignment.findOne({
+    const data = await queueDaycareInvitation({
       childId: req.params.childId,
-      daycareId: daycare._id,
-      status: { $in: ['pending', 'active'] }
-    });
-    if (existingAssignment) throw new AppError('This child is already invited or assigned to this daycare', 409);
-
-    const pendingInvitation = await Invitation.findOne({
-      type: 'daycare_child_assignment',
-      childId: req.params.childId,
-      daycareId: daycare._id,
-      status: 'pending',
-      expiresAt: { $gt: new Date() }
-    });
-    if (pendingInvitation) throw new AppError('A pending daycare invitation already exists for this child and daycare', 409);
-
-    const token = randomToken();
-    const invitation = await Invitation.create({
-      type: 'daycare_child_assignment',
-      tokenHash: hashToken(token),
-      email: invitedEmail ?? daycare.email ?? daycareOwner.email,
-      childId: req.params.childId,
-      daycareId: daycare._id,
-      invitedBy: req.user!._id,
+      daycareId: req.body.daycareId,
       message: req.body.message,
-      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
+      invitedById: req.user!._id.toString()
     });
-    await DaycareChildAssignment.updateOne(
-      { childId: req.params.childId, daycareId: daycare._id },
-      { $set: { assignedBy: req.user!._id, status: 'pending' }, $unset: { classroomId: '' } },
-      { upsert: true }
-    );
-    if (invitation.email) {
-      void EmailService.daycareInvite(invitation.email, token, child.fullName).catch((error) => {
-        console.error('Failed to send daycare invitation email', error);
-      });
-    }
-    ok(res, 'Daycare invitation queued', { invitationId: invitation._id, emailStatus: 'queued' }, 201);
+    ok(res, 'Daycare invitation queued', data, 201);
   })
 );

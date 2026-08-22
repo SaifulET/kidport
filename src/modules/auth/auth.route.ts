@@ -210,7 +210,15 @@ authRouter.post(
   })
 );
 
-authRouter.get('/me', requireAuth, asyncHandler(async (req, res) => ok(res, 'Current user', req.user)));
+authRouter.get('/me', requireAuth, asyncHandler(async (req, res) => {
+  const data: Record<string, unknown> = { user: req.user };
+  if (req.user!.userType === 'daycare' && req.user!.status === 'active') {
+    const daycare = await DaycareAccountService.ensureOwnerDaycare(req.user!);
+    data.daycare = daycare;
+    data.daycareId = daycare._id;
+  }
+  ok(res, 'Current user', data);
+}));
 
 authRouter.use((req, _res, next) => {
   next(new AppError(`Route not found: ${req.method} /auth${req.path}`, 404));

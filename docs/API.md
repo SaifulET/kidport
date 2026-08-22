@@ -458,13 +458,42 @@ Response:
   "success": true,
   "message": "Current user",
   "data": {
-    "_id": "66f...",
-    "fullName": "Jane Parent",
-    "email": "jane@example.com",
-    "userType": "caregiver",
-    "caregiverRole": "mother",
-    "profilePhoto": "https://kidport.s3.eu-north-1.amazonaws.com/users/66f.../profile/photo.jpg",
-    "status": "active"
+    "user": {
+      "_id": "66f...",
+      "fullName": "Jane Parent",
+      "email": "jane@example.com",
+      "userType": "caregiver",
+      "caregiverRole": "mother",
+      "profilePhoto": "https://kidport.s3.eu-north-1.amazonaws.com/users/66f.../profile/photo.jpg",
+      "status": "active"
+    }
+  }
+}
+```
+
+For an approved daycare account, the response also includes `daycareId` and `daycare`, derived from the bearer token:
+
+```json
+{
+  "success": true,
+  "message": "Current user",
+  "data": {
+    "user": {
+      "_id": "66f...",
+      "fullName": "Sunflower Owner",
+      "email": "owner@sunflower.example",
+      "userType": "daycare",
+      "daycareRole": "daycare_admin",
+      "status": "active"
+    },
+    "daycareId": "66f...",
+    "daycare": {
+      "_id": "66f...",
+      "name": "Sunflower Owner",
+      "email": "owner@sunflower.example",
+      "ownerId": "66f...",
+      "status": "active"
+    }
   }
 }
 ```
@@ -1238,6 +1267,28 @@ Response:
 }
 ```
 
+### GET `/daycare`
+
+Auth: required, approved daycare account required
+
+Returns the authenticated daycare user's own daycare profile. The daycare is resolved from the bearer token.
+
+Response:
+
+```json
+{
+  "success": true,
+  "message": "Daycare",
+  "data": {
+    "_id": "66f...",
+    "name": "Sunflower Owner",
+    "email": "owner@sunflower.example",
+    "ownerId": "66f...",
+    "status": "active"
+  }
+}
+```
+
 ### POST `/daycares`
 
 Auth: required, approved daycare account required
@@ -1379,6 +1430,54 @@ Response:
 }
 ```
 
+### GET `/daycare/members`
+
+Auth: required, approved daycare account required
+
+Lists members for the authenticated daycare user's own daycare. Optional query: `status=active`, `pending`, `removed`, or `rejected`.
+
+Response:
+
+```json
+{
+  "success": true,
+  "message": "Daycare members",
+  "data": []
+}
+```
+
+### POST `/daycare/members`
+
+Auth: required, approved daycare account required
+
+Adds a member to the authenticated daycare user's own daycare.
+
+Request body:
+
+```json
+{
+  "userId": "66f...",
+  "role": "daycare_employee",
+  "classroomIds": ["66f..."]
+}
+```
+
+Response:
+
+```json
+{
+  "success": true,
+  "message": "Daycare member saved",
+  "data": {
+    "_id": "66f...",
+    "daycareId": "66f...",
+    "userId": "66f...",
+    "role": "daycare_employee",
+    "status": "active"
+  }
+}
+```
+
 ### POST `/daycares/:daycareId/member-requests`
 
 Auth: required
@@ -1438,11 +1537,59 @@ Response:
 }
 ```
 
+### POST `/daycare/members/:memberId/approve`
+
+Auth: required, approved daycare account required
+
+Approves a pending member request for the authenticated daycare user's own daycare.
+
+Request body:
+
+```json
+{
+  "role": "daycare_employee",
+  "classroomIds": ["66f..."]
+}
+```
+
+Response:
+
+```json
+{
+  "success": true,
+  "message": "Daycare member approved",
+  "data": {
+    "_id": "66f...",
+    "role": "daycare_employee",
+    "status": "active"
+  }
+}
+```
+
 ### POST `/daycares/:daycareId/members/:memberId/reject`
 
 Auth: required, daycare admin required
 
 Rejects a pending daycare member request.
+
+Response:
+
+```json
+{
+  "success": true,
+  "message": "Daycare member request rejected",
+  "data": {
+    "_id": "66f...",
+    "status": "rejected"
+  }
+}
+```
+
+### POST `/daycare/members/:memberId/reject`
+
+Auth: required, approved daycare account required
+
+Rejects a pending member request for the authenticated daycare user's own daycare.
 
 Response:
 
@@ -1593,6 +1740,22 @@ Response:
 }
 ```
 
+### GET `/daycare/children/unassigned`
+
+Auth: required, approved daycare account required
+
+Returns unassigned children for the authenticated daycare user's own daycare.
+
+Response:
+
+```json
+{
+  "success": true,
+  "message": "Unassigned daycare children",
+  "data": []
+}
+```
+
 ## Classrooms
 
 ### POST `/classroom`
@@ -1609,12 +1772,13 @@ Request body:
   "icon": "sunflower",
   "theme": "yellow",
   "ageBand": "18-36 months",
-  "leadTeacher": "66f...",
   "description": "Toddler classroom",
   "capacity": 12,
   "status": "active"
 }
 ```
+
+`leadTeacher` is optional. If sent, it must be a real user `_id`.
 
 Response:
 
@@ -1629,7 +1793,6 @@ Response:
     "icon": "sunflower",
     "theme": "yellow",
     "ageBand": "18-36 months",
-    "leadTeacher": "66f...",
     "description": "Toddler classroom",
     "capacity": 12,
     "status": "active"
@@ -1638,6 +1801,22 @@ Response:
 ```
 
 Possible errors: `401`, `403` if the daycare account is not approved.
+
+### GET `/classroom`
+
+Auth: required, approved daycare account required
+
+Lists active classrooms for the authenticated daycare user's own daycare. The daycare is resolved from the bearer token.
+
+Response:
+
+```json
+{
+  "success": true,
+  "message": "Classrooms",
+  "data": []
+}
+```
 
 ### POST `/daycares/:daycareId/classrooms`
 
@@ -1651,7 +1830,6 @@ Request body:
   "icon": "sunflower",
   "theme": "yellow",
   "ageBand": "18-36 months",
-  "leadTeacher": "66f...",
   "description": "Toddler classroom",
   "capacity": 12,
   "status": "active"

@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { Types } from 'mongoose';
 import { z } from 'zod';
 import { requireAuth } from '../../middlewares/auth';
 import { requireDaycareAccess, requireDaycareAdmin } from '../../middlewares/authorization';
@@ -14,13 +15,18 @@ import { DaycareAccountService } from '../../services/DaycareAccountService';
 export const classroomsRouter = Router();
 classroomsRouter.use(requireAuth);
 
+const optionalObjectIdSchema = z.preprocess(
+  (value) => (value === '' || value === null ? undefined : value),
+  z.string().refine((value) => Types.ObjectId.isValid(value), 'Must be a valid ObjectId').optional()
+);
+
 const classroomSchema = z.object({
   body: z.object({
     name: z.string().min(1),
     icon: z.string().optional(),
     theme: z.string().optional(),
     ageBand: z.string().optional(),
-    leadTeacher: z.string().optional(),
+    leadTeacher: optionalObjectIdSchema,
     description: z.string().optional(),
     capacity: z.number().optional(),
     status: z.enum(['active', 'archived']).optional()
@@ -29,16 +35,18 @@ const classroomSchema = z.object({
 
 const getOwnedDaycareForApprovedUser = async (user: Express.Request['user']) => {
   if (!user) throw new AppError('Authentication required', 401);
-  if (user.userType !== 'daycare') throw new AppError('Only daycare accounts can create classrooms', 403);
-  if (user.status !== 'active') throw new AppError('Account approval required', 403);
-
-  return DaycareAccountService.ensureOwnerDaycare(user);
+  return DaycareAccountService.getApprovedOwnerDaycare(user);
 };
 
 classroomsRouter.post('/classroom', validate(classroomSchema), asyncHandler(async (req, res) => {
   const daycare = await getOwnedDaycareForApprovedUser(req.user);
   const classroom = await Classroom.create({ ...req.body, daycareId: daycare._id });
   ok(res, 'Classroom created', classroom, 201);
+}));
+
+classroomsRouter.get('/classroom', asyncHandler(async (req, res) => {
+  const daycare = await getOwnedDaycareForApprovedUser(req.user);
+  ok(res, 'Classrooms', await Classroom.find({ daycareId: daycare._id, status: 'active' }));
 }));
 
 classroomsRouter.post('/daycares/:daycareId/classrooms', requireDaycareAdmin(), validate(classroomSchema), asyncHandler(async (req, res) => {

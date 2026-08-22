@@ -1,11 +1,14 @@
 import type { Types } from 'mongoose';
 import { Daycare } from '../modules/daycare/daycare.model';
 import { DaycareMember } from '../modules/daycare/daycare-member.model';
+import { AppError } from '../utils/AppError';
 
 type DaycareAccountProfile = {
   _id: Types.ObjectId;
   fullName: string;
   email: string;
+  userType?: string;
+  status?: string;
 };
 
 export class DaycareAccountService {
@@ -23,5 +26,11 @@ export class DaycareAccountService {
     );
 
     return daycare;
+  }
+
+  static async getApprovedOwnerDaycare(user: DaycareAccountProfile) {
+    if (user.userType !== 'daycare') throw new AppError('Only daycare accounts can use this endpoint', 403);
+    if (user.status !== 'active') throw new AppError('Account approval required', 403);
+    return this.ensureOwnerDaycare(user);
   }
 }

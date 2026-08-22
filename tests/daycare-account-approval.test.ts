@@ -72,16 +72,11 @@ describe('daycare account approval', () => {
 
     expect(pendingAccounts.body.data).toHaveLength(1);
 
-    await request(app)
+    const approval = await request(app)
       .post(`/api/v1/auth/admin/daycare-accounts/${daycareRegistration.body.data.user._id}/approve`)
       .set('Authorization', `Bearer ${adminToken}`)
       .expect(200);
-
-    const daycare = await request(app)
-      .post('/api/v1/daycares')
-      .set('Authorization', `Bearer ${daycareToken}`)
-      .send({ name: 'Sunflower Learning Center' })
-      .expect(201);
+    expect(approval.body.data.daycare.name).toBe('Sunflower Owner');
 
     const classroom = await request(app)
       .post('/api/v1/classroom')
@@ -89,6 +84,6 @@ describe('daycare account approval', () => {
       .send({ name: 'Toddlers', capacity: 12 })
       .expect(201);
 
-    expect(classroom.body.data.daycareId).toBe(daycare.body.data._id);
+    expect(classroom.body.data.daycareId).toBe(approval.body.data.daycare._id);
   });
 });

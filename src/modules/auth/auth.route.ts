@@ -13,6 +13,7 @@ import { requirePlatformAdmin } from '../../middlewares/authorization';
 import { validate } from '../../middlewares/validate';
 import { registerSchema, loginSchema, refreshSchema } from './auth.validation';
 import { EmailService } from '../../services/EmailService';
+import { DaycareAccountService } from '../../services/DaycareAccountService';
 
 export const authRouter = Router();
 
@@ -109,7 +110,8 @@ authRouter.post('/admin/daycare-accounts/:userId/approve', requireAuth, requireP
     { new: true }
   ).select(publicUserFields);
   if (!user) throw new AppError('Pending daycare account not found', 404);
-  ok(res, 'Daycare account approved', user);
+  const daycare = await DaycareAccountService.ensureOwnerDaycare(user);
+  ok(res, 'Daycare account approved', { user, daycare });
 }));
 
 authRouter.post('/admin/daycare-accounts/:userId/reject', requireAuth, requirePlatformAdmin, asyncHandler(async (req, res) => {

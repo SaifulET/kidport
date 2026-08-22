@@ -255,7 +255,7 @@ Response:
 
 Auth: required, platform admin required
 
-Approves a pending daycare account. After approval, the daycare user can create their daycare profile and perform daycare-admin actions.
+Approves a pending daycare account. Approval also creates the daycare profile from the account name/email and makes the daycare user an active daycare admin.
 
 Response:
 
@@ -264,9 +264,18 @@ Response:
   "success": true,
   "message": "Daycare account approved",
   "data": {
-    "_id": "66f...",
-    "userType": "daycare",
-    "status": "active"
+    "user": {
+      "_id": "66f...",
+      "userType": "daycare",
+      "status": "active"
+    },
+    "daycare": {
+      "_id": "66f...",
+      "name": "Sunflower Owner",
+      "email": "owner@sunflower.example",
+      "ownerId": "66f...",
+      "status": "active"
+    }
   }
 }
 ```
@@ -1590,7 +1599,7 @@ Response:
 
 Auth: required, approved daycare account required
 
-Creates a classroom for the authenticated daycare user's own active daycare. Do not send `daycareId`; the API assigns it from the daycare profile owned by the logged-in user.
+Creates a classroom for the authenticated daycare user's own active daycare. Do not send `daycareId`; the API assigns it from the daycare profile owned by the logged-in user. If an older approved daycare account is missing its daycare profile, the API creates it automatically from the account name/email.
 
 Request body:
 
@@ -1628,7 +1637,7 @@ Response:
 }
 ```
 
-Possible errors: `401`, `403` if the daycare account is not approved, `404` if the daycare profile has not been created yet.
+Possible errors: `401`, `403` if the daycare account is not approved.
 
 ### POST `/daycares/:daycareId/classrooms`
 

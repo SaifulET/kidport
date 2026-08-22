@@ -22,6 +22,7 @@ import { Child } from './child.model';
 import { CareCircleMembership } from '../care-circle/care-circle-membership.model';
 import { User } from '../users/user.model';
 import { Daycare } from '../daycare/daycare.model';
+import { DaycareMember } from '../daycare/daycare-member.model';
 import { DaycareChildAssignment } from '../daycare/daycare-child-assignment.model';
 import { Invitation } from '../care-circle/invitation.model';
 import { Observation } from '../observations/observation.model';
@@ -510,7 +511,10 @@ childrenRouter.post(
     const child = await Child.findById(req.params.childId);
     if (!daycare || !child) throw new Error('Daycare or child not found');
     const daycareOwner = await User.findOne({ _id: daycare.ownerId, userType: 'daycare', status: 'active' });
-    if (!daycareOwner) throw new AppError('Daycare account must be approved before invitation', 403);
+    const daycareAdmin = daycareOwner
+      ? await DaycareMember.findOne({ daycareId: daycare._id, userId: daycareOwner._id, role: 'daycare_admin', status: 'active' })
+      : null;
+    if (!daycareOwner || !daycareAdmin) throw new AppError('Daycare account must be approved before invitation', 403);
 
     const existingAssignment = await DaycareChildAssignment.findOne({
       childId: req.params.childId,

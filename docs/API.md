@@ -1241,13 +1241,13 @@ Possible errors: `400`, `403`
 
 ## Daycares
 
-Parents/caregivers can list and view active daycares so they can send child assignment invitations. Only approved daycare accounts can create daycare records. Only the daycare owner can update or delete their daycare information.
+Parents/caregivers can list and view approved active daycares so they can send child assignment invitations. Only approved daycare accounts can create daycare records. Only the daycare owner can update or delete their daycare information.
 
 ### GET `/daycares`
 
 Auth: required
 
-Returns all active daycares.
+Returns all approved active daycares. Pending daycare accounts are not returned and cannot be invited.
 
 Response:
 

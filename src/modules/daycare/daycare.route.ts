@@ -14,6 +14,7 @@ import { DaycareMember } from './daycare-member.model';
 import { DaycareChildAssignment } from './daycare-child-assignment.model';
 import { Classroom } from '../classrooms/classroom.model';
 import { Observation } from '../observations/observation.model';
+import { User } from '../users/user.model';
 
 export const daycareRouter = Router();
 daycareRouter.use(requireAuth);
@@ -22,6 +23,15 @@ const memberRoleSchema = z.enum(['daycare_admin', 'daycare_employee']);
 const memberStatusSchema = z.enum(['pending', 'active', 'removed', 'rejected']);
 const memberClassroomIdsSchema = z.array(z.string()).optional();
 const unassignedClassroomFilter = { $or: [{ classroomId: { $exists: false } }, { classroomId: null }] };
+
+const approvedDaycareIds = async () => {
+  const activeOwnerIds = await User.find({ userType: 'daycare', status: 'active' }).distinct('_id');
+  return DaycareMember.find({
+    userId: { $in: activeOwnerIds },
+    role: 'daycare_admin',
+    status: 'active'
+  }).distinct('daycareId');
+};
 
 const requireDaycareAccount = asyncHandler(async (req, _res, next) => {
   if (req.user!.userType !== 'daycare') throw new AppError('Only daycare accounts can manage daycare information', 403);
@@ -39,7 +49,7 @@ const requireDaycareOwner = asyncHandler(async (req, _res, next) => {
 });
 
 daycareRouter.get('/daycares', asyncHandler(async (_req, res) => {
-  const daycares = await Daycare.find({ status: 'active' }).sort({ name: 1 });
+  const daycares = await Daycare.find({ _id: { $in: await approvedDaycareIds() }, status: 'active' }).sort({ name: 1 });
   ok(res, 'Daycares', daycares);
 }));
 
@@ -76,7 +86,7 @@ daycareRouter.post(
 );
 
 daycareRouter.get('/daycares/:daycareId', asyncHandler(async (req, res) => {
-  const daycare = await Daycare.findOne({ _id: req.params.daycareId, status: 'active' });
+  const daycare = await Daycare.findOne({ _id: { $eq: req.params.daycareId, $in: await approvedDaycareIds() }, status: 'active' });
   if (!daycare) throw new AppError('Daycare not found', 404);
   ok(res, 'Daycare', daycare);
 }));

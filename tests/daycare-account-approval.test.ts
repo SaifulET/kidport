@@ -244,10 +244,18 @@ describe('daycare account approval', () => {
     });
     const daycare = await Daycare.create({ name: 'Pending Daycare', ownerId: pendingDaycareOwner._id, email: pendingDaycareOwner.email });
     const child = await Child.create({ fullName: 'Mina Child', dateOfBirth: new Date('2021-01-01'), createdBy: owner._id });
+    const ownerToken = TokenService.signAccessToken(owner._id);
+
+    const daycares = await request(app)
+      .get('/api/v1/daycares')
+      .set('Authorization', `Bearer ${ownerToken}`)
+      .expect(200);
+
+    expect(daycares.body.data).toHaveLength(0);
 
     await request(app)
       .post(`/api/v1/children/${child._id}/daycare-invitations`)
-      .set('Authorization', `Bearer ${TokenService.signAccessToken(owner._id)}`)
+      .set('Authorization', `Bearer ${ownerToken}`)
       .send({ daycareId: daycare._id })
       .expect(403);
   });

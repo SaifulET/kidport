@@ -291,5 +291,14 @@ describe('daycare account approval', () => {
       .set('Authorization', `Bearer ${ownerToken}`)
       .send({ daycareId: daycare._id })
       .expect(403);
+
+    pendingDaycareOwner.status = 'active';
+    await pendingDaycareOwner.save();
+
+    await request(app)
+      .post(`/api/v1/children/${child._id}/daycare-invitations`)
+      .set('Authorization', `Bearer ${ownerToken}`)
+      .send({ email: pendingDaycareOwner.email })
+      .expect(201);
   });
 });

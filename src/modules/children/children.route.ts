@@ -16,6 +16,7 @@ import { DevelopmentScoringService } from '../../services/DevelopmentScoringServ
 import { ObservationService } from '../../services/ObservationService';
 import { ReportService } from '../../services/ReportService';
 import { EmailService } from '../../services/EmailService';
+import { DaycareAccountService } from '../../services/DaycareAccountService';
 import { StorageService } from '../../services/StorageService';
 import { SocialResponseService } from '../../services/SocialResponseService';
 import { Child } from './child.model';
@@ -513,15 +514,19 @@ childrenRouter.post(
   asyncHandler(async (req, res) => {
     const invitedEmail = req.body.email?.toLowerCase().trim();
     const daycareOwnerByEmail = invitedEmail ? await User.findOne({ email: invitedEmail, userType: 'daycare', status: 'active' }) : null;
-    const daycare = req.body.daycareId
+    let daycare = req.body.daycareId
       ? await Daycare.findOne({ _id: req.body.daycareId, status: 'active' })
       : await Daycare.findOne({
           status: 'active',
           $or: [{ email: invitedEmail }, ...(daycareOwnerByEmail ? [{ ownerId: daycareOwnerByEmail._id }] : [])]
         });
     const child = await Child.findById(req.params.childId);
+    if (!daycare && daycareOwnerByEmail) daycare = await DaycareAccountService.ensureOwnerDaycare(daycareOwnerByEmail);
     if (!daycare || !child) throw new Error('Daycare or child not found');
-    const daycareOwner = await User.findOne({ _id: daycare.ownerId, userType: 'daycare', status: 'active' });
+    const daycareOwner = daycareOwnerByEmail?._id.toString() === daycare.ownerId.toString()
+      ? daycareOwnerByEmail
+      : await User.findOne({ _id: daycare.ownerId, userType: 'daycare', status: 'active' });
+    if (daycareOwner) daycare = await DaycareAccountService.ensureOwnerDaycare(daycareOwner);
     const daycareAdmin = daycareOwner
       ? await DaycareMember.findOne({ daycareId: daycare._id, userId: daycareOwner._id, role: 'daycare_admin', status: 'active' })
       : null;

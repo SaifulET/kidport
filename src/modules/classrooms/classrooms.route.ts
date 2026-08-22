@@ -19,6 +19,7 @@ const optionalObjectIdSchema = z.preprocess(
   (value) => (value === '' || value === null ? undefined : value),
   z.string().refine((value) => Types.ObjectId.isValid(value), 'Must be a valid ObjectId').optional()
 );
+const objectIdSchema = z.string().refine((value) => Types.ObjectId.isValid(value), 'Must be a valid ObjectId');
 
 const classroomSchema = z.object({
   body: z.object({
@@ -31,6 +32,15 @@ const classroomSchema = z.object({
     capacity: z.number().optional(),
     status: z.enum(['active', 'archived']).optional()
   })
+});
+
+const classroomChildrenSchema = z.object({
+  body: z
+    .object({
+      childIds: z.array(objectIdSchema).min(1).optional(),
+      children: z.array(objectIdSchema).min(1).optional()
+    })
+    .refine((body) => body.childIds?.length || body.children?.length, 'childIds is required')
 });
 
 const getOwnedDaycareForApprovedUser = async (user: Express.Request['user']) => {
@@ -93,6 +103,41 @@ classroomsRouter.post('/classrooms/:classroomId/children/:childId', asyncHandler
   await assignment.save();
   await Child.updateOne({ _id: req.params.childId }, { $set: { daycare: classroom.daycareId, classroom: classroom._id } });
   ok(res, 'Child assigned to classroom', assignment);
+}));
+
+classroomsRouter.post('/classroom/:classroomId/children', validate(classroomChildrenSchema), asyncHandler(async (req, res) => {
+  const daycare = await getOwnedDaycareForApprovedUser(req.user);
+  const classroom = await Classroom.findOne({ _id: req.params.classroomId, daycareId: daycare._id, status: 'active' });
+  if (!classroom) throw new AppError('Classroom not found for this daycare', 404);
+
+  const childIds = [...new Set([...(req.body.childIds ?? req.body.children)].map(String))];
+  const assignments = await DaycareChildAssignment.find({
+    daycareId: daycare._id,
+    childId: { $in: childIds },
+    status: 'active'
+  });
+
+  const assignedChildIds = new Set(assignments.map((assignment) => assignment.childId.toString()));
+  const missingChildIds = childIds.filter((childId) => !assignedChildIds.has(childId));
+  if (missingChildIds.length) {
+    throw new AppError('Children must be assigned to this daycare before classroom placement', 403, missingChildIds);
+  }
+
+  await DaycareChildAssignment.updateMany(
+    { daycareId: daycare._id, childId: { $in: childIds }, status: 'active' },
+    { $set: { classroomId: classroom._id } }
+  );
+  await Child.updateMany(
+    { _id: { $in: childIds }, status: { $ne: 'deleted' } },
+    { $set: { daycare: daycare._id, classroom: classroom._id } }
+  );
+
+  ok(res, 'Children assigned to classroom', {
+    daycareId: daycare._id,
+    classroomId: classroom._id,
+    childIds,
+    assignedCount: childIds.length
+  });
 }));
 
 classroomsRouter.delete('/classrooms/:classroomId/children/:childId', asyncHandler(async (req, res) => {

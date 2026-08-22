@@ -1696,6 +1696,7 @@ Notes:
 
 - The parent/caregiver controls assignment.
 - The daycare does not gain active access until the invitation is accepted by an authorized daycare member.
+- A child can have only one pending or active invitation/assignment for the same daycare. Duplicate requests return `409`.
 
 ### GET `/daycare-invitations/:token`
 
@@ -1973,6 +1974,46 @@ Possible error:
 {
   "success": false,
   "message": "Child must be assigned to this daycare before classroom placement"
+}
+```
+
+### POST `/classroom/:classroomId/children`
+
+Auth: required, approved daycare account required
+
+Assigns one or more active, unassigned daycare children to a classroom owned by the authenticated daycare. The daycare is resolved from the bearer token.
+
+Request body:
+
+```json
+{
+  "childIds": ["66f..."]
+}
+```
+
+`children` is also accepted as an alias for `childIds`.
+
+Response:
+
+```json
+{
+  "success": true,
+  "message": "Children assigned to classroom",
+  "data": {
+    "daycareId": "66f...",
+    "classroomId": "66f...",
+    "childIds": ["66f..."],
+    "assignedCount": 1
+  }
+}
+```
+
+Possible error:
+
+```json
+{
+  "success": false,
+  "message": "Children must be assigned to this daycare before classroom placement"
 }
 ```
 

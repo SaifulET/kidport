@@ -508,6 +508,23 @@ childrenRouter.post(
     const daycare = await Daycare.findById(req.body.daycareId);
     const child = await Child.findById(req.params.childId);
     if (!daycare || !child) throw new Error('Daycare or child not found');
+
+    const existingAssignment = await DaycareChildAssignment.findOne({
+      childId: req.params.childId,
+      daycareId: req.body.daycareId,
+      status: { $in: ['pending', 'active'] }
+    });
+    if (existingAssignment) throw new AppError('This child is already invited or assigned to this daycare', 409);
+
+    const pendingInvitation = await Invitation.findOne({
+      type: 'daycare_child_assignment',
+      childId: req.params.childId,
+      daycareId: req.body.daycareId,
+      status: 'pending',
+      expiresAt: { $gt: new Date() }
+    });
+    if (pendingInvitation) throw new AppError('A pending daycare invitation already exists for this child and daycare', 409);
+
     const token = randomToken();
     const invitation = await Invitation.create({
       type: 'daycare_child_assignment',

@@ -7,6 +7,7 @@ import { User } from '../src/modules/users/user.model';
 import { Child } from '../src/modules/children/child.model';
 import { DaycareChildAssignment } from '../src/modules/daycare/daycare-child-assignment.model';
 import { Observation } from '../src/modules/observations/observation.model';
+import { TokenService } from '../src/services/TokenService';
 
 let mongo: MongoMemoryServer;
 const app = createApp();
@@ -118,12 +119,43 @@ describe('daycare account approval', () => {
       caregiverRole: 'parent'
     });
     const child = await Child.create({ fullName: 'Ava Child', dateOfBirth: new Date('2022-01-01'), createdBy: parent._id });
-    await DaycareChildAssignment.create({
-      childId: child._id,
-      daycareId: approval.body.data.daycare._id,
-      assignedBy: parent._id,
-      status: 'active'
-    });
+    const parentToken = TokenService.signAccessToken(parent._id);
+
+    await request(app)
+      .post(`/api/v1/children/${child._id}/daycare-invitations`)
+      .set('Authorization', `Bearer ${parentToken}`)
+      .send({ daycareId: approval.body.data.daycare._id })
+      .expect(201);
+
+    await request(app)
+      .post(`/api/v1/children/${child._id}/daycare-invitations`)
+      .set('Authorization', `Bearer ${parentToken}`)
+      .send({ daycareId: approval.body.data.daycare._id })
+      .expect(409);
+
+    await DaycareChildAssignment.updateOne(
+      { childId: child._id, daycareId: approval.body.data.daycare._id },
+      { $set: { status: 'active', assignedBy: parent._id } }
+    );
+
+    const unassignedBeforePlacement = await request(app)
+      .get('/api/v1/daycare/children/unassigned')
+      .set('Authorization', `Bearer ${daycareToken}`)
+      .expect(200);
+    expect(unassignedBeforePlacement.body.data).toHaveLength(1);
+
+    await request(app)
+      .post(`/api/v1/classroom/${classroom.body.data._id}/children`)
+      .set('Authorization', `Bearer ${daycareToken}`)
+      .send({ childIds: [child._id.toString()] })
+      .expect(200);
+
+    const unassignedAfterPlacement = await request(app)
+      .get('/api/v1/daycare/children/unassigned')
+      .set('Authorization', `Bearer ${daycareToken}`)
+      .expect(200);
+    expect(unassignedAfterPlacement.body.data).toHaveLength(0);
+
     await Observation.create({
       childId: child._id,
       authorId: daycareRegistration.body.data.user._id,

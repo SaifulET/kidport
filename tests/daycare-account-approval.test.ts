@@ -195,6 +195,25 @@ describe('daycare account approval', () => {
     const activeAssignment = await DaycareChildAssignment.findOne({ childId: child._id, daycareId: approval.body.data.daycare._id });
     expect(activeAssignment?.status).toBe('active');
 
+    const classroomDetails = await request(app)
+      .get(`/api/v1/classrooms/${classroom.body.data._id}`)
+      .set('Authorization', `Bearer ${daycareToken}`)
+      .expect(200);
+    expect(classroomDetails.body.data.name).toBe('Toddlers');
+    expect(classroomDetails.body.data.daycareId).toBe(approval.body.data.daycare._id);
+    expect(classroomDetails.body.data.children).toHaveLength(1);
+    expect(classroomDetails.body.data.children[0]).toMatchObject({
+      _id: child._id.toString(),
+      fullName: 'Ava Child',
+      daycare: approval.body.data.daycare._id,
+      classroom: classroom.body.data._id
+    });
+
+    await request(app)
+      .get(`/api/v1/classrooms/${classroom.body.data._id}`)
+      .set('Authorization', `Bearer ${parentToken}`)
+      .expect(403);
+
     const daycareInvitationsAfterPlacement = await request(app)
       .get('/api/v1/daycare/invitations')
       .set('Authorization', `Bearer ${daycareToken}`)

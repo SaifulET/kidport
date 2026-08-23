@@ -53,6 +53,36 @@ const getOwnedDaycareForApprovedUser = async (user: Express.Request['user']) => 
 const childIdsFromBody = (body: { childIds?: string[]; children?: string[] }) =>
   [...new Set([...(body.childIds ?? body.children ?? [])].map(String))];
 
+const classroomChildResponse = (child: InstanceType<typeof Child>) => {
+  const data = child.toObject();
+  const { profilePhoto: _profilePhoto, ...rest } = data;
+  return {
+    ...rest,
+    profileImage: child.profilePhoto?.url
+  };
+};
+
+const classroomDetailsResponse = async (classroom: InstanceType<typeof Classroom>) => {
+  const assignments = await DaycareChildAssignment.find({
+    daycareId: classroom.daycareId,
+    classroomId: classroom._id,
+    status: 'active'
+  }).select('childId');
+  const assignmentChildIds = assignments.map((assignment) => assignment.childId);
+  const children = await Child.find({
+    status: { $ne: 'deleted' },
+    $or: [
+      { _id: { $in: assignmentChildIds } },
+      { daycare: classroom.daycareId, classroom: classroom._id }
+    ]
+  }).sort({ fullName: 1 });
+
+  return {
+    ...classroom.toObject(),
+    children: children.map(classroomChildResponse)
+  };
+};
+
 const assignChildrenToClassroom = async (input: {
   classroom: InstanceType<typeof Classroom>;
   childIds: string[];
@@ -126,8 +156,12 @@ classroomsRouter.get('/daycares/:daycareId/classrooms', requireDaycareAccess(), 
 classroomsRouter.get('/classrooms/:classroomId', asyncHandler(async (req, res) => {
   const classroom = await Classroom.findById(req.params.classroomId);
   if (!classroom) throw new AppError('Classroom not found', 404);
-  await requireDaycareAccess('daycareId')({ ...req, params: { daycareId: classroom.daycareId.toString() } } as never, res, () => undefined);
-  ok(res, 'Classroom', classroom);
+  if (req.user!.status !== 'active') throw new AppError('Account approval required', 403);
+  const member = await import('../../services/AuthorizationService').then((m) =>
+    m.AuthorizationService.canAccessDaycare(req.user!._id.toString(), classroom.daycareId.toString())
+  );
+  if (!member) throw new AppError('You do not have access to this daycare', 403);
+  ok(res, 'Classroom', await classroomDetailsResponse(classroom));
 }));
 
 classroomsRouter.patch('/classrooms/:classroomId', asyncHandler(async (req, res) => {

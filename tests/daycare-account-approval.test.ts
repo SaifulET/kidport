@@ -201,6 +201,11 @@ describe('daycare account approval', () => {
       .expect(200);
     expect(classroomDetails.body.data.name).toBe('Toddlers');
     expect(classroomDetails.body.data.daycareId).toBe(approval.body.data.daycare._id);
+    expect(classroomDetails.body.data.daycare).toMatchObject({
+      _id: approval.body.data.daycare._id,
+      id: approval.body.data.daycare._id,
+      name: approval.body.data.daycare.name
+    });
     expect(classroomDetails.body.data.children).toHaveLength(1);
     expect(classroomDetails.body.data.children[0]).toMatchObject({
       _id: child._id.toString(),

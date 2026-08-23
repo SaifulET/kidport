@@ -11,6 +11,7 @@ import { AppError } from '../../utils/AppError';
 import { Classroom } from './classroom.model';
 import { DaycareChildAssignment } from '../daycare/daycare-child-assignment.model';
 import { Child } from '../children/child.model';
+import { Daycare } from '../daycare/daycare.model';
 import { DaycareAccountService } from '../../services/DaycareAccountService';
 import { Invitation } from '../care-circle/invitation.model';
 
@@ -63,11 +64,14 @@ const classroomChildResponse = (child: InstanceType<typeof Child>) => {
 };
 
 const classroomDetailsResponse = async (classroom: InstanceType<typeof Classroom>) => {
-  const assignments = await DaycareChildAssignment.find({
-    daycareId: classroom.daycareId,
-    classroomId: classroom._id,
-    status: 'active'
-  }).select('childId');
+  const [daycare, assignments] = await Promise.all([
+    Daycare.findById(classroom.daycareId).select('name'),
+    DaycareChildAssignment.find({
+      daycareId: classroom.daycareId,
+      classroomId: classroom._id,
+      status: 'active'
+    }).select('childId')
+  ]);
   const assignmentChildIds = assignments.map((assignment) => assignment.childId);
   const children = await Child.find({
     status: { $ne: 'deleted' },
@@ -79,6 +83,11 @@ const classroomDetailsResponse = async (classroom: InstanceType<typeof Classroom
 
   return {
     ...classroom.toObject(),
+    daycare: {
+      _id: daycare?._id ?? classroom.daycareId,
+      id: (daycare?._id ?? classroom.daycareId).toString(),
+      name: daycare?.name ?? null
+    },
     children: children.map(classroomChildResponse)
   };
 };

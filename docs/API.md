@@ -40,6 +40,8 @@ Paginated response:
 }
 ```
 
+List-style GET endpoints accept `page` and `limit` query parameters. Defaults are `page=1` and `limit=20`; `limit` must be between `1` and `100`.
+
 Authentication header for protected routes:
 
 ```http
@@ -2032,24 +2034,33 @@ Response:
 }
 ```
 
-### POST `/classrooms/:classroomId/children/:childId`
+### POST `/classrooms/:classroomId/children`
 
 Auth: required, daycare member required
 
-Request body: none
+Assigns one or more children to a classroom. Each child must already be assigned or invited to the classroom's daycare.
+
+Request body:
+
+```json
+{
+  "childIds": ["66f...", "66f..."]
+}
+```
+
+`children` is also accepted as an alias for `childIds`.
 
 Response:
 
 ```json
 {
   "success": true,
-  "message": "Child assigned to classroom",
+  "message": "Children assigned to classroom",
   "data": {
-    "_id": "66f...",
-    "childId": "66f...",
     "daycareId": "66f...",
     "classroomId": "66f...",
-    "status": "active"
+    "childIds": ["66f...", "66f..."],
+    "assignedCount": 2
   }
 }
 ```
@@ -2059,7 +2070,7 @@ Possible error:
 ```json
 {
   "success": false,
-  "message": "Child must be assigned to this daycare before classroom placement"
+  "message": "Children must be assigned to this daycare before classroom placement"
 }
 ```
 

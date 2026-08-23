@@ -3,6 +3,7 @@ import { requireAuth } from '../../middlewares/auth';
 import { upload } from '../../middlewares/upload';
 import { asyncHandler } from '../../utils/asyncHandler';
 import { ok } from '../../utils/apiResponse';
+import { paginationFromQuery } from '../../utils/pagination';
 import { AppError } from '../../utils/AppError';
 import { StorageService } from '../../services/StorageService';
 import { SupportIssue } from './support-issue.model';
@@ -32,6 +33,7 @@ const welcomeText = (name: string) => {
 };
 
 supportRouter.get('/support/messages', asyncHandler(async (req, res) => {
+  const { page, limit, skip } = paginationFromQuery(req.query);
   const userId = req.user!._id;
   const existingCount = await SupportMessage.countDocuments({ userId });
 
@@ -44,10 +46,18 @@ supportRouter.get('/support/messages', asyncHandler(async (req, res) => {
     });
   }
 
-  const messages = await SupportMessage.find({ userId }).sort({ createdAt: 1 });
-  ok(res, 'Support messages', {
+  const [total, messages] = await Promise.all([
+    SupportMessage.countDocuments({ userId }),
+    SupportMessage.find({ userId }).sort({ createdAt: 1 }).skip(skip).limit(limit)
+  ]);
+  res.json({
+    success: true,
+    message: 'Support messages',
+    data: {
     thread: supportThread(userId.toString()),
     messages: messages.map(messagePayload)
+    },
+    pagination: { page, limit, total, totalPages: Math.ceil(total / limit) }
   });
 }));
 

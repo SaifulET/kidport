@@ -3,7 +3,8 @@ import { z } from 'zod';
 import { requireAuth } from '../../middlewares/auth';
 import { validate } from '../../middlewares/validate';
 import { asyncHandler } from '../../utils/asyncHandler';
-import { ok } from '../../utils/apiResponse';
+import { ok, paginated } from '../../utils/apiResponse';
+import { paginationFromQuery } from '../../utils/pagination';
 import { DevelopmentDomain } from './development-domain.model';
 import { DevelopmentIndicator } from './development-indicator.model';
 import { AgeBand } from './age-band.model';
@@ -18,7 +19,15 @@ const slugify = (value: string) =>
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/(^-|-$)/g, '');
 
-domainsRouter.get('/domains', asyncHandler(async (_req, res) => ok(res, 'Development domains', await DevelopmentDomain.find({ status: 'active' }).sort({ sortOrder: 1 }))));
+domainsRouter.get('/domains', asyncHandler(async (req, res) => {
+  const { page, limit, skip } = paginationFromQuery(req.query);
+  const filter = { status: 'active' };
+  const [total, domains] = await Promise.all([
+    DevelopmentDomain.countDocuments(filter),
+    DevelopmentDomain.find(filter).sort({ sortOrder: 1 }).skip(skip).limit(limit)
+  ]);
+  paginated(res, 'Development domains', domains, page, limit, total);
+}));
 domainsRouter.post(
   '/domains',
   validate(z.object({ body: z.object({ name: z.string().min(1) }) })),
@@ -29,14 +38,27 @@ domainsRouter.post(
 );
 domainsRouter.patch('/domains/:domainId', asyncHandler(async (req, res) => ok(res, 'Domain updated', await DevelopmentDomain.findByIdAndUpdate(req.params.domainId, { $set: req.body }, { new: true }))));
 
-domainsRouter.get('/age-bands', asyncHandler(async (_req, res) => ok(res, 'Age bands', await AgeBand.find({ status: 'active' }).sort({ minMonths: 1 }))));
+domainsRouter.get('/age-bands', asyncHandler(async (req, res) => {
+  const { page, limit, skip } = paginationFromQuery(req.query);
+  const filter = { status: 'active' };
+  const [total, ageBands] = await Promise.all([
+    AgeBand.countDocuments(filter),
+    AgeBand.find(filter).sort({ minMonths: 1 }).skip(skip).limit(limit)
+  ]);
+  paginated(res, 'Age bands', ageBands, page, limit, total);
+}));
 domainsRouter.post('/age-bands', asyncHandler(async (req, res) => ok(res, 'Age band created', await AgeBand.create(req.body), 201)));
 
 domainsRouter.get('/indicators', asyncHandler(async (req, res) => {
+  const { page, limit, skip } = paginationFromQuery(req.query);
   const filter: Record<string, unknown> = { status: 'active' };
   if (req.query.domainId) filter.domainId = req.query.domainId;
   if (req.query.ageBandId) filter.ageBandId = req.query.ageBandId;
-  ok(res, 'Development indicators', await DevelopmentIndicator.find(filter));
+  const [total, indicators] = await Promise.all([
+    DevelopmentIndicator.countDocuments(filter),
+    DevelopmentIndicator.find(filter).skip(skip).limit(limit)
+  ]);
+  paginated(res, 'Development indicators', indicators, page, limit, total);
 }));
 domainsRouter.post('/indicators', asyncHandler(async (req, res) => ok(res, 'Indicator created', await DevelopmentIndicator.create(req.body), 201)));
 domainsRouter.patch('/indicators/:indicatorId', asyncHandler(async (req, res) => ok(res, 'Indicator updated', await DevelopmentIndicator.findByIdAndUpdate(req.params.indicatorId, { $set: req.body }, { new: true }))));

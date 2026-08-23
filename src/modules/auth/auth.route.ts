@@ -6,7 +6,8 @@ import { UserSettings } from '../settings/user-settings.model';
 import { TokenService } from '../../services/TokenService';
 import { AppError } from '../../utils/AppError';
 import { asyncHandler } from '../../utils/asyncHandler';
-import { ok } from '../../utils/apiResponse';
+import { ok, paginated } from '../../utils/apiResponse';
+import { paginationFromQuery, paginationQuerySchema } from '../../utils/pagination';
 import { randomOtp, hashToken } from '../../utils/crypto';
 import { requireAuth } from '../../middlewares/auth';
 import { requirePlatformAdmin } from '../../middlewares/authorization';
@@ -99,10 +100,15 @@ authRouter.get(
   '/admin/daycare-accounts',
   requireAuth,
   requirePlatformAdmin,
-  validate(z.object({ query: z.object({ status: z.enum(['pending', 'active', 'disabled', 'rejected']).default('pending') }) })),
+  validate(z.object({ query: z.object({ status: z.enum(['pending', 'active', 'disabled', 'rejected']).default('pending'), ...paginationQuerySchema }) })),
   asyncHandler(async (req, res) => {
-    const users = await User.find({ userType: 'daycare', status: req.query.status }).select(publicUserFields).sort({ createdAt: -1 });
-    ok(res, 'Daycare accounts', users);
+    const { page, limit, skip } = paginationFromQuery(req.query);
+    const filter = { userType: 'daycare', status: req.query.status };
+    const [total, users] = await Promise.all([
+      User.countDocuments(filter),
+      User.find(filter).select(publicUserFields).sort({ createdAt: -1 }).skip(skip).limit(limit)
+    ]);
+    paginated(res, 'Daycare accounts', users, page, limit, total);
   })
 );
 

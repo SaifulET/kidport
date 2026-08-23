@@ -7,6 +7,7 @@ import { validate } from '../../middlewares/validate';
 import { asyncHandler } from '../../utils/asyncHandler';
 import { AppError } from '../../utils/AppError';
 import { ok } from '../../utils/apiResponse';
+import { paginationFromQuery } from '../../utils/pagination';
 import { AuthorizationService } from '../../services/AuthorizationService';
 import { ObservationService } from '../../services/ObservationService';
 import { SocialResponseService } from '../../services/SocialResponseService';
@@ -170,6 +171,7 @@ observationsRouter.get('/observations/:observationId', asyncHandler(async (req, 
 }));
 
 observationsRouter.get('/observations/:observationId/details', asyncHandler(async (req, res) => {
+  const { page, limit, skip } = paginationFromQuery(req.query);
   const observation = await Observation.findById(req.params.observationId);
   if (!observation) throw new AppError('Observation not found', 404);
   if (observation.status === 'draft' && observation.authorId.toString() !== req.user!._id.toString()) {
@@ -178,14 +180,25 @@ observationsRouter.get('/observations/:observationId/details', asyncHandler(asyn
   const access = await AuthorizationService.getChildAccess(req.user!._id.toString(), observation.childId.toString());
   if (!access) throw new AppError('You do not have access to this child', 403);
 
-  const comments = await Comment.find({ observationId: observation._id, status: 'active' })
-    .populate('authorId', 'fullName profilePhoto caregiverRole daycareRole userType')
-    .sort({ createdAt: 1 });
+  const commentFilter = { observationId: observation._id, status: 'active' };
+  const [totalComments, comments] = await Promise.all([
+    Comment.countDocuments(commentFilter),
+    Comment.find(commentFilter)
+      .populate('authorId', 'fullName profilePhoto caregiverRole daycareRole userType')
+      .sort({ createdAt: 1 })
+      .skip(skip)
+      .limit(limit)
+  ]);
   const reactionCounts = await SocialResponseService.commentReactionCountMap(comments.map((comment) => comment._id));
 
-  ok(res, 'Observation details', {
-    observation: await observationCard(observation._id),
-    totalComments: comments.length,
-    comments: SocialResponseService.comments(comments, reactionCounts)
+  res.json({
+    success: true,
+    message: 'Observation details',
+    data: {
+      observation: await observationCard(observation._id),
+      totalComments,
+      comments: SocialResponseService.comments(comments, reactionCounts)
+    },
+    pagination: { page, limit, total: totalComments, totalPages: Math.ceil(totalComments / limit) }
   });
 }));

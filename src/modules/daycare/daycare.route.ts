@@ -5,7 +5,8 @@ import { requireDaycareAccess, requireDaycareAdmin } from '../../middlewares/aut
 import { validate } from '../../middlewares/validate';
 import { asyncHandler } from '../../utils/asyncHandler';
 import { AppError } from '../../utils/AppError';
-import { ok } from '../../utils/apiResponse';
+import { ok, paginated } from '../../utils/apiResponse';
+import { paginateArray, paginationFromQuery, paginationQuerySchema } from '../../utils/pagination';
 import { hashToken } from '../../utils/crypto';
 import { InvitationWorkflowService } from '../../services/ObservationService';
 import { DaycareAccountService } from '../../services/DaycareAccountService';
@@ -91,9 +92,14 @@ const requireDaycareOwner = asyncHandler(async (req, _res, next) => {
   next();
 });
 
-daycareRouter.get('/daycares', asyncHandler(async (_req, res) => {
-  const daycares = await Daycare.find({ _id: { $in: await approvedDaycareIds() }, status: 'active' }).sort({ name: 1 });
-  ok(res, 'Daycares', daycares);
+daycareRouter.get('/daycares', asyncHandler(async (req, res) => {
+  const { page, limit, skip } = paginationFromQuery(req.query);
+  const filter = { _id: { $in: await approvedDaycareIds() }, status: 'active' };
+  const [total, daycares] = await Promise.all([
+    Daycare.countDocuments(filter),
+    Daycare.find(filter).sort({ name: 1 }).skip(skip).limit(limit)
+  ]);
+  paginated(res, 'Daycares', daycares, page, limit, total);
 }));
 
 daycareRouter.get('/daycare', requireDaycareAccount, asyncHandler(async (req, res) => {
@@ -118,17 +124,24 @@ daycareRouter.get('/daycare/stats', requireDaycareAccount, asyncHandler(async (r
 }));
 
 daycareRouter.get('/daycare/invitations', requireDaycareAccount, asyncHandler(async (req, res) => {
+  const { page, limit, skip } = paginationFromQuery(req.query);
   const daycare = await DaycareAccountService.getApprovedOwnerDaycare(req.user!);
-  const invitations = await Invitation.find({
+  const filter = {
     type: 'daycare_child_assignment',
     daycareId: daycare._id,
     status: 'pending'
-  })
-    .populate('childId', 'fullName nickname profilePhoto dateOfBirth gender')
-    .populate('invitedBy', 'fullName email profilePhoto caregiverRole')
-    .sort({ createdAt: -1 });
+  };
+  const [total, invitations] = await Promise.all([
+    Invitation.countDocuments(filter),
+    Invitation.find(filter)
+      .populate('childId', 'fullName nickname profilePhoto dateOfBirth gender')
+      .populate('invitedBy', 'fullName email profilePhoto caregiverRole')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+  ]);
 
-  ok(res, 'Daycare invitations', invitations);
+  paginated(res, 'Daycare invitations', invitations, page, limit, total);
 }));
 
 daycareRouter.post(
@@ -203,13 +216,15 @@ daycareRouter.post(
 daycareRouter.get(
   '/daycares/:daycareId/members',
   requireDaycareAdmin(),
-  validate(z.object({ query: z.object({ status: memberStatusSchema.default('active') }) })),
+  validate(z.object({ query: z.object({ status: memberStatusSchema.default('active'), ...paginationQuerySchema }) })),
   asyncHandler(async (req, res) => {
-    ok(
-      res,
-      'Daycare members',
-      await DaycareMember.find({ daycareId: req.params.daycareId, status: req.query.status }).populate('userId', 'fullName email daycareRole')
-    );
+    const { page, limit, skip } = paginationFromQuery(req.query);
+    const filter = { daycareId: req.params.daycareId, status: req.query.status };
+    const [total, members] = await Promise.all([
+      DaycareMember.countDocuments(filter),
+      DaycareMember.find(filter).populate('userId', 'fullName email daycareRole').skip(skip).limit(limit)
+    ]);
+    paginated(res, 'Daycare members', members, page, limit, total);
   })
 );
 
@@ -247,14 +262,16 @@ daycareRouter.post('/daycares/:daycareId/members/:memberId/reject', requireDayca
 daycareRouter.get(
   '/daycare/members',
   requireDaycareAccount,
-  validate(z.object({ query: z.object({ status: memberStatusSchema.default('active') }) })),
+  validate(z.object({ query: z.object({ status: memberStatusSchema.default('active'), ...paginationQuerySchema }) })),
   asyncHandler(async (req, res) => {
+    const { page, limit, skip } = paginationFromQuery(req.query);
     const daycare = await DaycareAccountService.getApprovedOwnerDaycare(req.user!);
-    ok(
-      res,
-      'Daycare members',
-      await DaycareMember.find({ daycareId: daycare._id, status: req.query.status }).populate('userId', 'fullName email daycareRole')
-    );
+    const filter = { daycareId: daycare._id, status: req.query.status };
+    const [total, members] = await Promise.all([
+      DaycareMember.countDocuments(filter),
+      DaycareMember.find(filter).populate('userId', 'fullName email daycareRole').skip(skip).limit(limit)
+    ]);
+    paginated(res, 'Daycare members', members, page, limit, total);
   })
 );
 
@@ -329,10 +346,14 @@ daycareRouter.get('/daycare-invitations/:token/accept', acceptDaycareInvitation)
 daycareRouter.post('/daycare-invitations/:token/accept', acceptDaycareInvitation);
 
 daycareRouter.get('/daycares/:daycareId/children/unassigned', requireDaycareAccess(), asyncHandler(async (req, res) => {
-  ok(res, 'Unassigned daycare children', await unassignedChildrenForDaycare(req.params.daycareId));
+  const { page, limit } = paginationFromQuery(req.query);
+  const children = await unassignedChildrenForDaycare(req.params.daycareId);
+  paginated(res, 'Unassigned daycare children', paginateArray(children, page, limit), page, limit, children.length);
 }));
 
 daycareRouter.get('/daycare/children/unassigned', requireDaycareAccount, asyncHandler(async (req, res) => {
+  const { page, limit } = paginationFromQuery(req.query);
   const daycare = await DaycareAccountService.getApprovedOwnerDaycare(req.user!);
-  ok(res, 'Unassigned daycare children', await unassignedChildrenForDaycare(daycare._id));
+  const children = await unassignedChildrenForDaycare(daycare._id);
+  paginated(res, 'Unassigned daycare children', paginateArray(children, page, limit), page, limit, children.length);
 }));

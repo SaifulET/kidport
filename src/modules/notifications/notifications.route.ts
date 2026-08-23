@@ -2,17 +2,17 @@ import { Router } from 'express';
 import { requireAuth } from '../../middlewares/auth';
 import { asyncHandler } from '../../utils/asyncHandler';
 import { ok, paginated } from '../../utils/apiResponse';
+import { paginationFromQuery } from '../../utils/pagination';
 import { Notification } from './notification.model';
 
 export const notificationsRouter = Router();
 notificationsRouter.use(requireAuth);
 
 notificationsRouter.get('/notifications', asyncHandler(async (req, res) => {
-  const page = Number(req.query.page ?? 1);
-  const limit = Number(req.query.limit ?? 20);
+  const { page, limit, skip } = paginationFromQuery(req.query);
   const filter = { userId: req.user!._id };
   const total = await Notification.countDocuments(filter);
-  const notifications = await Notification.find(filter).sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit);
+  const notifications = await Notification.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit);
   paginated(res, 'Notifications', notifications, page, limit, total);
 }));
 

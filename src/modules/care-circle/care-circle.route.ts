@@ -5,7 +5,8 @@ import { requireChildAccess, requireChildOwner } from '../../middlewares/authori
 import { validate } from '../../middlewares/validate';
 import { asyncHandler } from '../../utils/asyncHandler';
 import { AppError } from '../../utils/AppError';
-import { ok } from '../../utils/apiResponse';
+import { ok, paginated } from '../../utils/apiResponse';
+import { paginationFromQuery } from '../../utils/pagination';
 import { randomToken, hashToken } from '../../utils/crypto';
 import { EmailService } from '../../services/EmailService';
 import { InvitationWorkflowService } from '../../services/ObservationService';
@@ -17,8 +18,13 @@ import { Invitation } from './invitation.model';
 export const careCircleRouter = Router();
 
 careCircleRouter.get('/children/:childId/care-circle', requireAuth, requireChildAccess(), asyncHandler(async (req, res) => {
-  const members = await CareCircleMembership.find({ childId: req.params.childId, status: 'active' }).populate('userId', 'fullName email profilePhoto caregiverRole daycareRole');
-  ok(res, 'Care circle', members);
+  const { page, limit, skip } = paginationFromQuery(req.query);
+  const filter = { childId: req.params.childId, status: 'active' };
+  const [total, members] = await Promise.all([
+    CareCircleMembership.countDocuments(filter),
+    CareCircleMembership.find(filter).populate('userId', 'fullName email profilePhoto caregiverRole daycareRole').skip(skip).limit(limit)
+  ]);
+  paginated(res, 'Care circle', members, page, limit, total);
 }));
 
 careCircleRouter.post(

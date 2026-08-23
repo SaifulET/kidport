@@ -5,7 +5,8 @@ import { requireAuth } from '../../middlewares/auth';
 import { requireDaycareAccess, requireDaycareAdmin } from '../../middlewares/authorization';
 import { validate } from '../../middlewares/validate';
 import { asyncHandler } from '../../utils/asyncHandler';
-import { ok } from '../../utils/apiResponse';
+import { ok, paginated } from '../../utils/apiResponse';
+import { paginationFromQuery } from '../../utils/pagination';
 import { AppError } from '../../utils/AppError';
 import { Classroom } from './classroom.model';
 import { DaycareChildAssignment } from '../daycare/daycare-child-assignment.model';
@@ -49,6 +50,47 @@ const getOwnedDaycareForApprovedUser = async (user: Express.Request['user']) => 
   return DaycareAccountService.getApprovedOwnerDaycare(user);
 };
 
+const childIdsFromBody = (body: { childIds?: string[]; children?: string[] }) =>
+  [...new Set([...(body.childIds ?? body.children ?? [])].map(String))];
+
+const assignChildrenToClassroom = async (input: {
+  classroom: InstanceType<typeof Classroom>;
+  childIds: string[];
+  userId: unknown;
+}) => {
+  const assignments = await DaycareChildAssignment.find({
+    daycareId: input.classroom.daycareId,
+    childId: { $in: input.childIds },
+    status: { $in: ['pending', 'active'] }
+  });
+
+  const assignedChildIds = new Set(assignments.map((assignment) => assignment.childId.toString()));
+  const missingChildIds = input.childIds.filter((childId) => !assignedChildIds.has(childId));
+  if (missingChildIds.length) {
+    throw new AppError('Children must be assigned to this daycare before classroom placement', 403, missingChildIds);
+  }
+
+  await DaycareChildAssignment.updateMany(
+    { daycareId: input.classroom.daycareId, childId: { $in: input.childIds }, status: { $in: ['pending', 'active'] } },
+    { $set: { classroomId: input.classroom._id, status: 'active', acceptedBy: input.userId, acceptedAt: new Date() } }
+  );
+  await Invitation.updateMany(
+    { type: 'daycare_child_assignment', daycareId: input.classroom.daycareId, childId: { $in: input.childIds }, status: 'pending' },
+    { $set: { status: 'accepted', acceptedBy: input.userId, acceptedAt: new Date() } }
+  );
+  await Child.updateMany(
+    { _id: { $in: input.childIds }, status: { $ne: 'deleted' } },
+    { $set: { daycare: input.classroom.daycareId, classroom: input.classroom._id } }
+  );
+
+  return {
+    daycareId: input.classroom.daycareId,
+    classroomId: input.classroom._id,
+    childIds: input.childIds,
+    assignedCount: input.childIds.length
+  };
+};
+
 classroomsRouter.post('/classroom', validate(classroomSchema), asyncHandler(async (req, res) => {
   const daycare = await getOwnedDaycareForApprovedUser(req.user);
   const classroom = await Classroom.create({ ...req.body, daycareId: daycare._id });
@@ -56,8 +98,14 @@ classroomsRouter.post('/classroom', validate(classroomSchema), asyncHandler(asyn
 }));
 
 classroomsRouter.get('/classroom', asyncHandler(async (req, res) => {
+  const { page, limit, skip } = paginationFromQuery(req.query);
   const daycare = await getOwnedDaycareForApprovedUser(req.user);
-  ok(res, 'Classrooms', await Classroom.find({ daycareId: daycare._id, status: 'active' }));
+  const filter = { daycareId: daycare._id, status: 'active' };
+  const [total, classrooms] = await Promise.all([
+    Classroom.countDocuments(filter),
+    Classroom.find(filter).skip(skip).limit(limit)
+  ]);
+  paginated(res, 'Classrooms', classrooms, page, limit, total);
 }));
 
 classroomsRouter.post('/daycares/:daycareId/classrooms', requireDaycareAdmin(), validate(classroomSchema), asyncHandler(async (req, res) => {
@@ -66,7 +114,13 @@ classroomsRouter.post('/daycares/:daycareId/classrooms', requireDaycareAdmin(), 
 }));
 
 classroomsRouter.get('/daycares/:daycareId/classrooms', requireDaycareAccess(), asyncHandler(async (req, res) => {
-  ok(res, 'Classrooms', await Classroom.find({ daycareId: req.params.daycareId, status: 'active' }));
+  const { page, limit, skip } = paginationFromQuery(req.query);
+  const filter = { daycareId: req.params.daycareId, status: 'active' };
+  const [total, classrooms] = await Promise.all([
+    Classroom.countDocuments(filter),
+    Classroom.find(filter).skip(skip).limit(limit)
+  ]);
+  paginated(res, 'Classrooms', classrooms, page, limit, total);
 }));
 
 classroomsRouter.get('/classrooms/:classroomId', asyncHandler(async (req, res) => {
@@ -93,28 +147,17 @@ classroomsRouter.delete('/classrooms/:classroomId', asyncHandler(async (req, res
   ok(res, 'Classroom archived');
 }));
 
-classroomsRouter.post('/classrooms/:classroomId/children/:childId', asyncHandler(async (req, res) => {
+classroomsRouter.post('/classrooms/:classroomId/children', validate(classroomChildrenSchema), asyncHandler(async (req, res) => {
   const classroom = await Classroom.findById(req.params.classroomId);
   if (!classroom) throw new AppError('Classroom not found', 404);
   const member = await import('../../services/AuthorizationService').then((m) => m.AuthorizationService.canAccessDaycare(req.user!._id.toString(), classroom.daycareId.toString()));
   if (!member) throw new AppError('You do not have access to this daycare', 403);
-  const assignment = await DaycareChildAssignment.findOne({
-    childId: req.params.childId,
-    daycareId: classroom.daycareId,
-    status: { $in: ['pending', 'active'] }
+  const data = await assignChildrenToClassroom({
+    classroom,
+    childIds: childIdsFromBody(req.body),
+    userId: req.user!._id
   });
-  if (!assignment) throw new AppError('Child must be assigned to this daycare before classroom placement', 403);
-  assignment.classroomId = classroom._id;
-  assignment.status = 'active';
-  assignment.acceptedBy = req.user!._id;
-  assignment.acceptedAt = new Date();
-  await assignment.save();
-  await Invitation.updateOne(
-    { type: 'daycare_child_assignment', childId: req.params.childId, daycareId: classroom.daycareId, status: 'pending' },
-    { $set: { status: 'accepted', acceptedBy: req.user!._id, acceptedAt: new Date() } }
-  );
-  await Child.updateOne({ _id: req.params.childId }, { $set: { daycare: classroom.daycareId, classroom: classroom._id } });
-  ok(res, 'Child assigned to classroom', assignment);
+  ok(res, 'Children assigned to classroom', data);
 }));
 
 classroomsRouter.post('/classroom/:classroomId/children', validate(classroomChildrenSchema), asyncHandler(async (req, res) => {
@@ -122,38 +165,13 @@ classroomsRouter.post('/classroom/:classroomId/children', validate(classroomChil
   const classroom = await Classroom.findOne({ _id: req.params.classroomId, daycareId: daycare._id, status: 'active' });
   if (!classroom) throw new AppError('Classroom not found for this daycare', 404);
 
-  const childIds = [...new Set([...(req.body.childIds ?? req.body.children)].map(String))];
-  const assignments = await DaycareChildAssignment.find({
-    daycareId: daycare._id,
-    childId: { $in: childIds },
-    status: { $in: ['pending', 'active'] }
+  const data = await assignChildrenToClassroom({
+    classroom,
+    childIds: childIdsFromBody(req.body),
+    userId: req.user!._id
   });
 
-  const assignedChildIds = new Set(assignments.map((assignment) => assignment.childId.toString()));
-  const missingChildIds = childIds.filter((childId) => !assignedChildIds.has(childId));
-  if (missingChildIds.length) {
-    throw new AppError('Children must be assigned to this daycare before classroom placement', 403, missingChildIds);
-  }
-
-  await DaycareChildAssignment.updateMany(
-    { daycareId: daycare._id, childId: { $in: childIds }, status: { $in: ['pending', 'active'] } },
-    { $set: { classroomId: classroom._id, status: 'active', acceptedBy: req.user!._id, acceptedAt: new Date() } }
-  );
-  await Invitation.updateMany(
-    { type: 'daycare_child_assignment', daycareId: daycare._id, childId: { $in: childIds }, status: 'pending' },
-    { $set: { status: 'accepted', acceptedBy: req.user!._id, acceptedAt: new Date() } }
-  );
-  await Child.updateMany(
-    { _id: { $in: childIds }, status: { $ne: 'deleted' } },
-    { $set: { daycare: daycare._id, classroom: classroom._id } }
-  );
-
-  ok(res, 'Children assigned to classroom', {
-    daycareId: daycare._id,
-    classroomId: classroom._id,
-    childIds,
-    assignedCount: childIds.length
-  });
+  ok(res, 'Children assigned to classroom', data);
 }));
 
 classroomsRouter.delete('/classrooms/:classroomId/children/:childId', asyncHandler(async (req, res) => {

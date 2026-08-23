@@ -17,7 +17,8 @@ import { reportsRouter } from '../modules/reports/reports.route';
 import { aiRouter } from '../modules/ai/ai.route';
 import { supportRouter } from '../modules/support/support.route';
 import { requireAuth } from '../middlewares/auth';
-import { ok } from '../utils/apiResponse';
+import { ok, paginated } from '../utils/apiResponse';
+import { paginationFromQuery } from '../utils/pagination';
 
 export const v1Router = Router();
 
@@ -47,6 +48,12 @@ v1Router.delete('/account', requireAuth, async (req, res) => {
   ok(res, 'Account deleted');
 });
 
-v1Router.get('/milestones', requireAuth, (_req, res) => ok(res, 'Use /children/:childId/milestones for milestone data', []));
-v1Router.get('/achievements', requireAuth, (_req, res) => ok(res, 'Use /children/:childId/achievements for achievement data', []));
+v1Router.get('/milestones', requireAuth, (req, res) => {
+  const { page, limit } = paginationFromQuery(req.query);
+  paginated(res, 'Use /children/:childId/milestones for milestone data', [], page, limit, 0);
+});
+v1Router.get('/achievements', requireAuth, (req, res) => {
+  const { page, limit } = paginationFromQuery(req.query);
+  paginated(res, 'Use /children/:childId/achievements for achievement data', [], page, limit, 0);
+});
 v1Router.get('/expert-guidance', requireAuth, (_req, res) => ok(res, 'Use /children/:childId/expert-guidance for child-specific guidance', []));

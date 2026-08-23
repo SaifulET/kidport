@@ -180,10 +180,18 @@ describe('daycare account approval', () => {
       .expect(200);
     expect(unassignedWithNullClassroom.body.data).toHaveLength(1);
 
+    const secondChild = await Child.create({ fullName: 'Zara Child', dateOfBirth: new Date('2021-06-01'), createdBy: parent._id });
+    await DaycareChildAssignment.create({
+      childId: secondChild._id,
+      daycareId: approval.body.data.daycare._id,
+      assignedBy: parent._id,
+      status: 'active'
+    });
+
     await request(app)
       .post(`/api/v1/classroom/${classroom.body.data._id}/children`)
       .set('Authorization', `Bearer ${daycareToken}`)
-      .send({ childIds: [child._id.toString()] })
+      .send({ childIds: [child._id.toString(), secondChild._id.toString()] })
       .expect(200);
 
     const unassignedAfterPlacement = await request(app)
@@ -195,8 +203,18 @@ describe('daycare account approval', () => {
     const activeAssignment = await DaycareChildAssignment.findOne({ childId: child._id, daycareId: approval.body.data.daycare._id });
     expect(activeAssignment?.status).toBe('active');
 
+    await Observation.create({
+      childId: child._id,
+      authorId: daycareRegistration.body.data.user._id,
+      daycareId: approval.body.data.daycare._id,
+      classroomId: classroom.body.data._id,
+      type: 'text',
+      text: 'Ava stacked blocks.',
+      status: 'active'
+    });
+
     const classroomDetails = await request(app)
-      .get(`/api/v1/classrooms/${classroom.body.data._id}`)
+      .get(`/api/v1/classrooms/${classroom.body.data._id}?page=1&limit=1`)
       .set('Authorization', `Bearer ${daycareToken}`)
       .expect(200);
     expect(classroomDetails.body.data.name).toBe('Toddlers');
@@ -205,6 +223,21 @@ describe('daycare account approval', () => {
       _id: approval.body.data.daycare._id,
       id: approval.body.data.daycare._id,
       name: approval.body.data.daycare.name
+    });
+    expect(classroomDetails.body.data.analytics).toMatchObject({
+      totalChildren: 2,
+      recentObservationsLast7Days: 1,
+      averageAge: {
+        years: expect.any(Number),
+        months: expect.any(Number),
+        totalMonths: expect.any(Number)
+      }
+    });
+    expect(classroomDetails.body.data.childrenPagination).toMatchObject({
+      page: 1,
+      limit: 1,
+      total: 2,
+      totalPages: 2
     });
     expect(classroomDetails.body.data.children).toHaveLength(1);
     expect(classroomDetails.body.data.children[0]).toMatchObject({
@@ -225,15 +258,6 @@ describe('daycare account approval', () => {
       .expect(200);
     expect(daycareInvitationsAfterPlacement.body.data).toHaveLength(0);
 
-    await Observation.create({
-      childId: child._id,
-      authorId: daycareRegistration.body.data.user._id,
-      daycareId: approval.body.data.daycare._id,
-      type: 'text',
-      text: 'Ava stacked blocks.',
-      status: 'active'
-    });
-
     const stats = await request(app)
       .get('/api/v1/daycare/stats')
       .set('Authorization', `Bearer ${daycareToken}`)
@@ -243,7 +267,7 @@ describe('daycare account approval', () => {
       daycareId: approval.body.data.daycare._id,
       totalClassrooms: 1,
       totalObservations: 1,
-      totalAssociatedChildren: 1
+      totalAssociatedChildren: 2
     });
   });
 

@@ -7,11 +7,13 @@ import { validate } from '../../middlewares/validate';
 import { asyncHandler } from '../../utils/asyncHandler';
 import { ok, paginated } from '../../utils/apiResponse';
 import { paginationFromQuery } from '../../utils/pagination';
+import { calculateAge } from '../../utils/date';
 import { AppError } from '../../utils/AppError';
 import { Classroom } from './classroom.model';
 import { DaycareChildAssignment } from '../daycare/daycare-child-assignment.model';
 import { Child } from '../children/child.model';
 import { Daycare } from '../daycare/daycare.model';
+import { Observation } from '../observations/observation.model';
 import { DaycareAccountService } from '../../services/DaycareAccountService';
 import { Invitation } from '../care-circle/invitation.model';
 
@@ -63,7 +65,22 @@ const classroomChildResponse = (child: InstanceType<typeof Child>) => {
   };
 };
 
-const classroomDetailsResponse = async (classroom: InstanceType<typeof Classroom>) => {
+const averageAgeResponse = (children: Array<InstanceType<typeof Child>>) => {
+  if (!children.length) return null;
+  const totalMonths = Math.round(
+    children.reduce((sum, child) => sum + calculateAge(child.dateOfBirth).totalMonths, 0) / children.length
+  );
+  return {
+    years: Math.floor(totalMonths / 12),
+    months: totalMonths % 12,
+    totalMonths
+  };
+};
+
+const classroomDetailsResponse = async (
+  classroom: InstanceType<typeof Classroom>,
+  pagination: ReturnType<typeof paginationFromQuery>
+) => {
   const [daycare, assignments] = await Promise.all([
     Daycare.findById(classroom.daycareId).select('name'),
     DaycareChildAssignment.find({
@@ -73,13 +90,28 @@ const classroomDetailsResponse = async (classroom: InstanceType<typeof Classroom
     }).select('childId')
   ]);
   const assignmentChildIds = assignments.map((assignment) => assignment.childId);
-  const children = await Child.find({
+  const childFilter = {
     status: { $ne: 'deleted' },
     $or: [
       { _id: { $in: assignmentChildIds } },
       { daycare: classroom.daycareId, classroom: classroom._id }
     ]
-  }).sort({ fullName: 1 });
+  };
+  const [totalChildren, allChildren, children] = await Promise.all([
+    Child.countDocuments(childFilter),
+    Child.find(childFilter).select('dateOfBirth'),
+    Child.find(childFilter).sort({ fullName: 1 }).skip(pagination.skip).limit(pagination.limit)
+  ]);
+  const childIds = allChildren.map((child) => child._id);
+  const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+  const recentObservationsLast7Days = await Observation.countDocuments({
+    status: 'active',
+    occurredAt: { $gte: sevenDaysAgo },
+    $or: [
+      { classroomId: classroom._id },
+      { daycareId: classroom.daycareId, childId: { $in: childIds } }
+    ]
+  });
 
   return {
     ...classroom.toObject(),
@@ -87,6 +119,17 @@ const classroomDetailsResponse = async (classroom: InstanceType<typeof Classroom
       _id: daycare?._id ?? classroom.daycareId,
       id: (daycare?._id ?? classroom.daycareId).toString(),
       name: daycare?.name ?? null
+    },
+    analytics: {
+      totalChildren,
+      recentObservationsLast7Days,
+      averageAge: averageAgeResponse(allChildren)
+    },
+    childrenPagination: {
+      page: pagination.page,
+      limit: pagination.limit,
+      total: totalChildren,
+      totalPages: Math.ceil(totalChildren / pagination.limit)
     },
     children: children.map(classroomChildResponse)
   };
@@ -170,7 +213,7 @@ classroomsRouter.get('/classrooms/:classroomId', asyncHandler(async (req, res) =
     m.AuthorizationService.canAccessDaycare(req.user!._id.toString(), classroom.daycareId.toString())
   );
   if (!member) throw new AppError('You do not have access to this daycare', 403);
-  ok(res, 'Classroom', await classroomDetailsResponse(classroom));
+  ok(res, 'Classroom', await classroomDetailsResponse(classroom, paginationFromQuery(req.query)));
 }));
 
 classroomsRouter.patch('/classrooms/:classroomId', asyncHandler(async (req, res) => {

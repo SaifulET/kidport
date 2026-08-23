@@ -7,7 +7,6 @@ import { validate } from '../../middlewares/validate';
 import { asyncHandler } from '../../utils/asyncHandler';
 import { ok, paginated } from '../../utils/apiResponse';
 import { paginationFromQuery } from '../../utils/pagination';
-import { calculateAge } from '../../utils/date';
 import { AppError } from '../../utils/AppError';
 import { Classroom } from './classroom.model';
 import { DaycareChildAssignment } from '../daycare/daycare-child-assignment.model';
@@ -65,18 +64,6 @@ const classroomChildResponse = (child: InstanceType<typeof Child>) => {
   };
 };
 
-const averageAgeResponse = (children: Array<InstanceType<typeof Child>>) => {
-  if (!children.length) return null;
-  const totalMonths = Math.round(
-    children.reduce((sum, child) => sum + calculateAge(child.dateOfBirth).totalMonths, 0) / children.length
-  );
-  return {
-    years: Math.floor(totalMonths / 12),
-    months: totalMonths % 12,
-    totalMonths
-  };
-};
-
 const classroomDetailsResponse = async (
   classroom: InstanceType<typeof Classroom>,
   pagination: ReturnType<typeof paginationFromQuery>
@@ -123,7 +110,7 @@ const classroomDetailsResponse = async (
     analytics: {
       totalChildren,
       recentObservationsLast7Days,
-      averageAge: averageAgeResponse(allChildren)
+      capacity: classroom.capacity ?? null
     },
     childrenPagination: {
       page: pagination.page,

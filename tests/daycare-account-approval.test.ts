@@ -227,11 +227,7 @@ describe('daycare account approval', () => {
     expect(classroomDetails.body.data.analytics).toMatchObject({
       totalChildren: 2,
       recentObservationsLast7Days: 1,
-      averageAge: {
-        years: expect.any(Number),
-        months: expect.any(Number),
-        totalMonths: expect.any(Number)
-      }
+      capacity: 12
     });
     expect(classroomDetails.body.data.childrenPagination).toMatchObject({
       page: 1,

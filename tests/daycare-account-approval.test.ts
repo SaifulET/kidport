@@ -232,6 +232,7 @@ describe('daycare account approval', () => {
     expect(classroomDetails.body.data.childrenPagination).toMatchObject({
       page: 1,
       limit: 1,
+      count: 1,
       total: 2,
       totalPages: 2
     });

@@ -115,6 +115,7 @@ const classroomDetailsResponse = async (
     childrenPagination: {
       page: pagination.page,
       limit: pagination.limit,
+      count: children.length,
       total: totalChildren,
       totalPages: Math.ceil(totalChildren / pagination.limit)
     },

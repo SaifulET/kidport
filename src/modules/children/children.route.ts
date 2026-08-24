@@ -21,6 +21,7 @@ import { EmailService } from '../../services/EmailService';
 import { DaycareAccountService } from '../../services/DaycareAccountService';
 import { StorageService } from '../../services/StorageService';
 import { SocialResponseService } from '../../services/SocialResponseService';
+import { NotificationService } from '../../services/NotificationService';
 import { Child } from './child.model';
 import { CareCircleMembership } from '../care-circle/care-circle-membership.model';
 import { User } from '../users/user.model';
@@ -436,6 +437,11 @@ childrenRouter.post(
       relationship: req.user!.caregiverRole ?? 'parent',
       permissions: { canView: true, canComment: true, canObserve: true, canInvite: true, canManage: true }
     });
+    void NotificationService.createForAdmins('child_created', 'New child profile', `${child.fullName} was added by ${req.user!.fullName}.`, {
+      childId: child._id.toString(),
+      userId: req.user!._id.toString(),
+      link: '/children'
+    }).catch((error) => console.error('Failed to create admin child notification', error));
     ok(res, 'Child created', childResponse(child), 201);
   })
 );

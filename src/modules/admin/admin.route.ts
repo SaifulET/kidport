@@ -10,7 +10,9 @@ import { ok, paginated } from '../../utils/apiResponse';
 import { paginationFromQuery, paginationQuerySchema } from '../../utils/pagination';
 import { Child } from '../children/child.model';
 import { CareCircleMembership } from '../care-circle/care-circle-membership.model';
+import { Classroom } from '../classrooms/classroom.model';
 import { Daycare } from '../daycare/daycare.model';
+import { DaycareChildAssignment } from '../daycare/daycare-child-assignment.model';
 import { Notification } from '../notifications/notification.model';
 import { Observation } from '../observations/observation.model';
 import { SupportIssue } from '../support/support-issue.model';
@@ -162,6 +164,7 @@ adminRouter.get('/users', asyncHandler(async (req, res) => {
   if (role === 'Daycare') filter.userType = 'daycare';
   if (status === 'Active') filter.status = 'active';
   if (status === 'Blocked') filter.status = 'disabled';
+  if (status === 'Pending') filter.status = 'pending';
   if (search) {
     filter.$or = [
       { fullName: { $regex: search, $options: 'i' } },
@@ -183,7 +186,7 @@ adminRouter.get('/users', asyncHandler(async (req, res) => {
   const [childrenByCaregiver, daycares, daycareChildren] = await Promise.all([
     Child.find({ status: { $ne: 'deleted' }, $or: [{ createdBy: { $in: userIds } }, { caregivers: { $in: userIds } }] }).select('fullName dateOfBirth gender profilePhoto status createdBy caregivers daycare developmentOverallScore').lean(),
     Daycare.find({ ownerId: { $in: userIds }, status: { $ne: 'deleted' } }).select('_id ownerId name').lean(),
-    Child.find({ status: { $ne: 'deleted' }, daycare: { $exists: true } }).select('fullName dateOfBirth gender profilePhoto status daycare developmentOverallScore').lean()
+    Child.find({ status: { $ne: 'deleted' }, daycare: { $exists: true } }).select('fullName dateOfBirth gender profilePhoto status daycare classroom developmentOverallScore').lean()
   ]);
 
   const daycareIdByOwner = new Map(daycares.map((daycare) => [daycare.ownerId.toString(), daycare._id.toString()]));
@@ -215,6 +218,7 @@ adminRouter.get('/users', asyncHandler(async (req, res) => {
       blocked: user.status === 'disabled',
       createdDate: user.createdAt,
       initials: initials(user.fullName),
+      daycareId,
       children: relatedChildren.map(childPayload),
       childIds: relatedChildren.map((child: any) => child._id.toString())
     };
@@ -344,6 +348,83 @@ adminRouter.patch(
   })
 );
 
+adminRouter.get('/daycares/:daycareId/classrooms', asyncHandler(async (req, res) => {
+  const daycareId = objectIdOrThrow(req.params.daycareId, 'Daycare id');
+  const daycare = await Daycare.findOne({ _id: daycareId, status: { $ne: 'deleted' } });
+  if (!daycare) throw new AppError('Daycare not found', 404);
+
+  const [classrooms, children] = await Promise.all([
+    Classroom.find({ daycareId, status: { $ne: 'archived' } }).sort({ name: 1 }),
+    Child.find({ daycare: daycareId, status: { $ne: 'deleted' } }).sort({ fullName: 1 })
+  ]);
+
+  const payloadForChild = (child: InstanceType<typeof Child>) => ({
+    id: child._id.toString(),
+    name: child.fullName,
+    initials: initials(child.fullName),
+    dob: child.dateOfBirth,
+    age: formatAge(child.dateOfBirth),
+    gender: child.gender,
+    status: child.status,
+    blocked: child.status === 'archived',
+    classroomId: child.classroom?.toString() ?? null
+  });
+
+  const classroomPayload = classrooms.map((classroom) => ({
+    id: classroom._id.toString(),
+    name: classroom.name,
+    ageBand: classroom.ageBand ?? null,
+    capacity: classroom.capacity ?? null,
+    status: classroom.status,
+    children: children.filter((child) => child.classroom?.toString() === classroom._id.toString()).map(payloadForChild)
+  }));
+
+  ok(res, 'Admin daycare classrooms', {
+    daycare: { id: daycare._id.toString(), name: daycare.name },
+    classrooms: classroomPayload,
+    unassignedChildren: children.filter((child) => !child.classroom).map(payloadForChild)
+  });
+}));
+
+adminRouter.post(
+  '/classrooms/:classroomId/children',
+  validate(z.object({ body: z.object({ childIds: z.array(z.string().refine((value) => Types.ObjectId.isValid(value), 'Child id must be valid')).min(1) }) })),
+  asyncHandler(async (req, res) => {
+    const classroom = await Classroom.findOne({ _id: objectIdOrThrow(req.params.classroomId, 'Classroom id'), status: { $ne: 'archived' } });
+    if (!classroom) throw new AppError('Classroom not found', 404);
+    const childIds = req.body.childIds.map((id: string) => objectIdOrThrow(id, 'Child id'));
+
+    const children = await Child.find({ _id: { $in: childIds }, daycare: classroom.daycareId, status: { $ne: 'deleted' } });
+    if (children.length !== childIds.length) throw new AppError('All children must belong to the classroom daycare', 403);
+
+    await Promise.all(
+      childIds.map((childId: Types.ObjectId) =>
+        DaycareChildAssignment.updateOne(
+          { daycareId: classroom.daycareId, childId },
+          {
+            $set: {
+              daycareId: classroom.daycareId,
+              childId,
+              classroomId: classroom._id,
+              assignedBy: req.user!._id,
+              acceptedBy: req.user!._id,
+              acceptedAt: new Date(),
+              status: 'active'
+            }
+          },
+          { upsert: true }
+        )
+      )
+    );
+    await Child.updateMany({ _id: { $in: childIds } }, { $set: { classroom: classroom._id, daycare: classroom.daycareId } });
+
+    ok(res, 'Children moved to classroom', {
+      classroomId: classroom._id.toString(),
+      childIds: childIds.map(String)
+    });
+  })
+);
+
 adminRouter.get('/observations', asyncHandler(async (req, res) => {
   const { page, limit, skip } = paginationFromQuery(req.query);
   const type = typeof req.query.type === 'string' ? req.query.type : undefined;
@@ -394,9 +475,11 @@ adminRouter.delete('/observations/:observationId', asyncHandler(async (req, res)
 
 adminRouter.get('/notifications', asyncHandler(async (req, res) => {
   const { page, limit, skip } = paginationFromQuery(req.query);
+  const adminUserIds = await User.find({ userType: 'admin', status: { $ne: 'deleted' } }).distinct('_id');
+  const filter = { userId: { $in: adminUserIds } };
   const [total, notifications] = await Promise.all([
-    Notification.countDocuments({}),
-    Notification.find({}).populate('userId', 'fullName email').sort({ createdAt: -1 }).skip(skip).limit(limit)
+    Notification.countDocuments(filter),
+    Notification.find(filter).populate('userId', 'fullName email').sort({ createdAt: -1 }).skip(skip).limit(limit)
   ]);
   paginated(
     res,
@@ -408,6 +491,8 @@ adminRouter.get('/notifications', asyncHandler(async (req, res) => {
       message: notification.body ?? '',
       date: notification.createdAt,
       read: notification.read,
+      link: notification.data?.link ?? null,
+      data: notification.data ?? {},
       user: notification.userId ? { name: notification.userId.fullName, email: notification.userId.email } : null
     })),
     page,
@@ -427,7 +512,8 @@ adminRouter.patch('/notifications/:notificationId/read', asyncHandler(async (req
 }));
 
 adminRouter.patch('/notifications/read-all', asyncHandler(async (_req, res) => {
-  const result = await Notification.updateMany({ read: false }, { $set: { read: true, readAt: new Date() } });
+  const adminUserIds = await User.find({ userType: 'admin', status: { $ne: 'deleted' } }).distinct('_id');
+  const result = await Notification.updateMany({ userId: { $in: adminUserIds }, read: false }, { $set: { read: true, readAt: new Date() } });
   ok(res, 'Notifications marked read', { modifiedCount: result.modifiedCount });
 }));
 

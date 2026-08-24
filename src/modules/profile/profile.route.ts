@@ -9,6 +9,7 @@ import { ok } from '../../utils/apiResponse';
 import { StorageService } from '../../services/StorageService';
 import { AccessibleChildrenService } from '../../services/AccessibleChildrenService';
 import { Observation } from '../observations/observation.model';
+import { User } from '../users/user.model';
 
 export const profileRouter = Router();
 profileRouter.use(requireAuth);
@@ -17,6 +18,7 @@ const profileFields = (body: Record<string, unknown>) =>
   Object.fromEntries(
     Object.entries({
       fullName: body.fullName,
+      email: typeof body.email === 'string' ? body.email.toLowerCase().trim() : undefined,
       phoneNumber: body.phoneNumber,
       bio: body.bio
     }).filter(([, value]) => value !== undefined)
@@ -60,9 +62,13 @@ profileRouter.get('/stats', asyncHandler(async (req, res) => {
 profileRouter.patch(
   '/',
   upload.single('photo'),
-  validate(z.object({ body: z.object({ fullName: z.string().min(1).optional(), phoneNumber: z.string().optional(), bio: z.string().optional() }) })),
+  validate(z.object({ body: z.object({ fullName: z.string().min(1).optional(), email: z.string().email().optional(), phoneNumber: z.string().optional(), bio: z.string().optional() }) })),
   asyncHandler(async (req, res) => {
     ensureProfilePhoto(req.file);
+    if (req.body.email && req.body.email.toLowerCase().trim() !== req.user!.email) {
+      const existing = await User.findOne({ email: req.body.email.toLowerCase().trim(), _id: { $ne: req.user!._id } });
+      if (existing) throw new AppError('Email is already registered', 409);
+    }
     Object.assign(req.user!, profileFields(req.body));
     if (req.file) req.user!.profilePhoto = await StorageService.uploadBuffer(`users/${req.user!._id}/profile`, req.file);
     await req.user!.save();

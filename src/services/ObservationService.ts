@@ -259,6 +259,11 @@ export class ObservationService {
         childId: input.childId,
         observationId: observation._id.toString()
       });
+      await NotificationService.createForAdmins('milestone_achieved', 'New milestone achieved', `${child.fullName} reached a confident milestone.`, {
+        childId: input.childId,
+        observationId: observation._id.toString(),
+        link: '/observations'
+      });
     }
 
     if (shouldProcessMediaInBackground) {
@@ -372,6 +377,11 @@ export class ObservationService {
         await NotificationService.createMany([...new Set(recipients)], 'milestone_achieved', 'New milestone achieved', `${child.fullName} reached a confident milestone.`, {
           childId: observation.childId.toString(),
           observationId: observation._id.toString()
+        });
+        await NotificationService.createForAdmins('milestone_achieved', 'New milestone achieved', `${child.fullName} reached a confident milestone.`, {
+          childId: observation.childId.toString(),
+          observationId: observation._id.toString(),
+          link: '/observations'
         });
       }
 

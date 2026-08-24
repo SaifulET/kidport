@@ -15,6 +15,7 @@ import { validate } from '../../middlewares/validate';
 import { registerSchema, loginSchema, refreshSchema } from './auth.validation';
 import { EmailService } from '../../services/EmailService';
 import { DaycareAccountService } from '../../services/DaycareAccountService';
+import { NotificationService } from '../../services/NotificationService';
 import { InvitationWorkflowService } from '../../services/ObservationService';
 
 export const authRouter = Router();
@@ -42,6 +43,12 @@ authRouter.post(
     const passwordHash = await bcrypt.hash(req.body.password, 12);
     const user = await User.create({ fullName: req.body.fullName, email: req.body.email, passwordHash, ...identityToAccount(req.body.identity) });
     await UserSettings.create({ userId: user._id });
+    void NotificationService.createForAdmins(
+      user.userType === 'daycare' ? 'daycare_account_pending' : 'parent_account_created',
+      user.userType === 'daycare' ? 'Daycare account pending approval' : 'New parent account',
+      `${user.fullName} registered with ${user.email}.`,
+      { userId: user._id.toString(), link: '/user-management', role: user.userType === 'daycare' ? 'Daycare' : 'Parent' }
+    ).catch((error) => console.error('Failed to create admin account notification', error));
     const acceptedInvitations = await InvitationWorkflowService.acceptPendingCareCircleInvitationsForUser(user._id.toString());
     const accessToken = TokenService.signAccessToken(user._id);
     const refreshToken = await TokenService.issueRefreshToken(user._id, { ip: req.ip, userAgent: req.get('user-agent') });
@@ -120,6 +127,9 @@ authRouter.post('/admin/daycare-accounts/:userId/approve', requireAuth, requireP
   ).select(publicUserFields);
   if (!user) throw new AppError('Pending daycare account not found', 404);
   const daycare = await DaycareAccountService.ensureOwnerDaycare(user);
+  await NotificationService.create(user._id.toString(), 'daycare_account_approved', 'Daycare account approved', 'Your daycare account has been approved.', {
+    daycareId: daycare._id.toString()
+  });
   ok(res, 'Daycare account approved', { user, daycare });
 }));
 
@@ -130,6 +140,9 @@ authRouter.post('/admin/daycare-accounts/:userId/reject', requireAuth, requirePl
     { new: true }
   ).select(publicUserFields);
   if (!user) throw new AppError('Pending daycare account not found', 404);
+  await NotificationService.create(user._id.toString(), 'daycare_account_rejected', 'Daycare account rejected', 'Your daycare account was not approved.', {
+    userId: user._id.toString()
+  });
   ok(res, 'Daycare account rejected', user);
 }));
 

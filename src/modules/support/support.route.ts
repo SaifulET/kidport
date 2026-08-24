@@ -6,6 +6,7 @@ import { ok } from '../../utils/apiResponse';
 import { paginationFromQuery } from '../../utils/pagination';
 import { AppError } from '../../utils/AppError';
 import { StorageService } from '../../services/StorageService';
+import { NotificationService } from '../../services/NotificationService';
 import { SupportIssue } from './support-issue.model';
 import { FeatureRequest } from './feature-request.model';
 import { SupportMessage } from './support-message.model';
@@ -90,6 +91,11 @@ supportRouter.post('/support/issues', upload.array('attachments', 5), asyncHandl
   const files = (req.files as Express.Multer.File[]) ?? [];
   const attachments = await Promise.all(files.map((file) => StorageService.uploadBuffer(`support/${req.user!._id}`, file)));
   const issue = await SupportIssue.create({ ...req.body, userId: req.user!._id, attachments });
+  void NotificationService.createForAdmins('support_issue_created', 'New support ticket', `${req.user!.fullName} opened a support ticket: ${issue.title}.`, {
+    ticketId: issue._id.toString(),
+    userId: req.user!._id.toString(),
+    link: '/support'
+  }).catch((error) => console.error('Failed to create admin support notification', error));
   ok(res, 'Support issue submitted', issue, 201);
 }));
 

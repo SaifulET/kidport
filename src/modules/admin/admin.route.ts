@@ -1,0 +1,633 @@
+import { Router } from 'express';
+import { z } from 'zod';
+import { Types } from 'mongoose';
+import { requireAuth } from '../../middlewares/auth';
+import { requirePlatformAdmin } from '../../middlewares/authorization';
+import { validate } from '../../middlewares/validate';
+import { AppError } from '../../utils/AppError';
+import { asyncHandler } from '../../utils/asyncHandler';
+import { ok, paginated } from '../../utils/apiResponse';
+import { paginationFromQuery, paginationQuerySchema } from '../../utils/pagination';
+import { Child } from '../children/child.model';
+import { CareCircleMembership } from '../care-circle/care-circle-membership.model';
+import { Daycare } from '../daycare/daycare.model';
+import { Notification } from '../notifications/notification.model';
+import { Observation } from '../observations/observation.model';
+import { SupportIssue } from '../support/support-issue.model';
+import { SupportMessage } from '../support/support-message.model';
+import { Subscription } from '../subscriptions/subscription.model';
+import { User } from '../users/user.model';
+
+export const adminRouter = Router();
+
+adminRouter.use(requireAuth, requirePlatformAdmin);
+
+const publicUserFields = '-passwordHash -passwordResetTokenHash -passwordResetExpiresAt';
+
+const startOfDay = (date = new Date()) => {
+  const value = new Date(date);
+  value.setHours(0, 0, 0, 0);
+  return value;
+};
+
+const daysAgo = (days: number) => {
+  const value = startOfDay();
+  value.setDate(value.getDate() - days);
+  return value;
+};
+
+const initials = (name: string) =>
+  name
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((part) => part[0])
+    .join('')
+    .slice(0, 2)
+    .toUpperCase();
+
+const formatAge = (dateOfBirth: Date) => {
+  const now = new Date();
+  let months = (now.getFullYear() - dateOfBirth.getFullYear()) * 12 + now.getMonth() - dateOfBirth.getMonth();
+  if (now.getDate() < dateOfBirth.getDate()) months -= 1;
+  if (months < 0) months = 0;
+  const years = Math.floor(months / 12);
+  const remainingMonths = months % 12;
+  if (years === 0) return `${remainingMonths} month${remainingMonths === 1 ? '' : 's'}`;
+  if (remainingMonths === 0) return `${years} year${years === 1 ? '' : 's'}`;
+  return `${years} year${years === 1 ? '' : 's'} ${remainingMonths} month${remainingMonths === 1 ? '' : 's'}`;
+};
+
+const monthKey = (date: Date) => date.toLocaleString('en-US', { month: 'short' });
+const dayKey = (date: Date) => date.toLocaleString('en-US', { month: 'short', day: 'numeric' });
+const weekdayKey = (date: Date) => date.toLocaleString('en-US', { weekday: 'short' });
+
+const objectIdOrThrow = (id: string, label: string) => {
+  if (!Types.ObjectId.isValid(id)) throw new AppError(`${label} is invalid`, 400);
+  return new Types.ObjectId(id);
+};
+
+const userRoleLabel = (userType: string) => (userType === 'daycare' ? 'Daycare' : userType === 'admin' ? 'Admin' : 'Parent');
+const userStatus = (status: string) => (status === 'disabled' ? 'Blocked' : status === 'deleted' ? 'Deleted' : status === 'pending' ? 'Pending' : 'Active');
+
+const dashboardWindow = () =>
+  Array.from({ length: 7 }, (_, index) => {
+    const date = daysAgo(6 - index);
+    return date;
+  });
+
+adminRouter.get('/dashboard', asyncHandler(async (_req, res) => {
+  const today = startOfDay();
+  const weekStart = daysAgo(6);
+
+  const [
+    totalDaycares,
+    totalChildren,
+    dailyObservations,
+    totalCareCircle,
+    parents,
+    daycareUsers,
+    openTickets,
+    flaggedObservations,
+    activityUsers,
+    observationTrend,
+    recentObservations
+  ] = await Promise.all([
+    Daycare.countDocuments({ status: 'active' }),
+    Child.countDocuments({ status: 'active' }),
+    Observation.countDocuments({ status: 'active', occurredAt: { $gte: today } }),
+    CareCircleMembership.countDocuments({ status: 'active' }),
+    User.countDocuments({ userType: 'caregiver', status: { $ne: 'deleted' } }),
+    User.countDocuments({ userType: 'daycare', status: { $ne: 'deleted' } }),
+    SupportIssue.countDocuments({ status: { $in: ['open', 'in_progress'] } }),
+    Observation.countDocuments({ status: 'active', aiMetadata: { $exists: true } }),
+    User.aggregate([
+      { $match: { userType: { $in: ['caregiver', 'daycare'] }, status: { $ne: 'deleted' }, createdAt: { $gte: weekStart } } },
+      { $group: { _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } }, value: { $sum: 1 } } }
+    ]),
+    Observation.aggregate([
+      { $match: { status: 'active', occurredAt: { $gte: weekStart } } },
+      { $group: { _id: { $dateToString: { format: '%Y-%m-%d', date: '$occurredAt' } }, value: { $sum: 1 } } }
+    ]),
+    Observation.find({ status: 'active' })
+      .populate('authorId', 'fullName')
+      .populate('childId', 'fullName')
+      .sort({ occurredAt: -1 })
+      .limit(5)
+  ]);
+
+  const activityByDay = new Map(activityUsers.map((item) => [item._id, item.value]));
+  const observationsByDay = new Map(observationTrend.map((item) => [item._id, item.value]));
+  const dates = dashboardWindow();
+
+  ok(res, 'Admin dashboard', {
+    stats: {
+      totalDaycares,
+      totalChildren,
+      dailyObservations,
+      activeCareCircle: totalCareCircle
+    },
+    userActivityData: dates.map((date) => ({ name: dayKey(date), value: activityByDay.get(date.toISOString().slice(0, 10)) ?? 0 })),
+    rolesData: [
+      { name: 'Parents', value: parents, color: '#00b4d8' },
+      { name: 'Daycare', value: daycareUsers, color: '#ff9f1c' }
+    ],
+    observationsData: dates.map((date) => ({ name: weekdayKey(date), value: observationsByDay.get(date.toISOString().slice(0, 10)) ?? 0 })),
+    recentActivity: recentObservations.map((observation: any) => {
+      const authorName = observation.authorId?.fullName ?? 'Unknown caregiver';
+      const childName = observation.childId?.fullName ?? 'a child';
+      return {
+        initial: initials(authorName),
+        name: authorName,
+        desc: `Added ${observation.type} observation for ${childName}`,
+        time: observation.occurredAt,
+        flag: Boolean(observation.aiMetadata?.flagged)
+      };
+    }),
+    alerts: [
+      { id: 'support-open', type: 'warning', title: `${openTickets} support tickets need attention`, time: 'Live' },
+      { id: 'ai-review', type: 'danger', title: `${flaggedObservations} AI-reviewed observations available`, time: 'Live' },
+      { id: 'api-health', type: 'info', title: 'Admin API connected successfully', time: 'Now' }
+    ]
+  });
+}));
+
+adminRouter.get('/users', asyncHandler(async (req, res) => {
+  const { page, limit, skip } = paginationFromQuery(req.query);
+  const role = typeof req.query.role === 'string' ? req.query.role : undefined;
+  const status = typeof req.query.status === 'string' ? req.query.status : undefined;
+  const search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
+  const filter: Record<string, unknown> = { userType: { $in: ['caregiver', 'daycare'] }, status: { $ne: 'deleted' } };
+
+  if (role === 'Parent') filter.userType = 'caregiver';
+  if (role === 'Daycare') filter.userType = 'daycare';
+  if (status === 'Active') filter.status = 'active';
+  if (status === 'Blocked') filter.status = 'disabled';
+  if (search) {
+    filter.$or = [
+      { fullName: { $regex: search, $options: 'i' } },
+      { email: { $regex: search, $options: 'i' } },
+      { phoneNumber: { $regex: search, $options: 'i' } }
+    ];
+  }
+
+  const [total, users, roleCounts] = await Promise.all([
+    User.countDocuments(filter),
+    User.find(filter).select(publicUserFields).sort({ createdAt: -1 }).skip(skip).limit(limit),
+    User.aggregate([
+      { $match: { userType: { $in: ['caregiver', 'daycare'] }, status: { $ne: 'deleted' } } },
+      { $group: { _id: '$userType', count: { $sum: 1 } } }
+    ])
+  ]);
+
+  const userIds = users.map((user) => user._id);
+  const [childrenByCaregiver, daycares, daycareChildren] = await Promise.all([
+    Child.find({ status: { $ne: 'deleted' }, $or: [{ createdBy: { $in: userIds } }, { caregivers: { $in: userIds } }] }).select('fullName dateOfBirth gender profilePhoto status createdBy caregivers daycare developmentOverallScore').lean(),
+    Daycare.find({ ownerId: { $in: userIds }, status: { $ne: 'deleted' } }).select('_id ownerId name').lean(),
+    Child.find({ status: { $ne: 'deleted' }, daycare: { $exists: true } }).select('fullName dateOfBirth gender profilePhoto status daycare developmentOverallScore').lean()
+  ]);
+
+  const daycareIdByOwner = new Map(daycares.map((daycare) => [daycare.ownerId.toString(), daycare._id.toString()]));
+  const childPayload = (child: any) => ({
+    id: child._id.toString(),
+    name: child.fullName,
+    dob: child.dateOfBirth,
+    age: formatAge(child.dateOfBirth),
+    gender: child.gender,
+    image: typeof child.profilePhoto === 'string' ? child.profilePhoto : child.profilePhoto?.url ?? null,
+    development: child.developmentOverallScore == null ? 'No development score yet.' : `Overall development score: ${Math.round(child.developmentOverallScore)}%`,
+    status: child.status === 'active' ? 'Active' : 'Inactive'
+  });
+
+  const data = users.map((user) => {
+    const userId = user._id.toString();
+    const daycareId = daycareIdByOwner.get(userId);
+    const relatedChildren = user.userType === 'daycare'
+      ? daycareChildren.filter((child: any) => child.daycare?.toString() === daycareId)
+      : childrenByCaregiver.filter((child: any) => child.createdBy?.toString() === userId || child.caregivers?.some((caregiverId: Types.ObjectId) => caregiverId.toString() === userId));
+
+    return {
+      id: userId,
+      name: user.fullName,
+      email: user.email,
+      phone: user.phoneNumber ?? '',
+      role: userRoleLabel(user.userType),
+      status: userStatus(user.status),
+      blocked: user.status === 'disabled',
+      createdDate: user.createdAt,
+      initials: initials(user.fullName),
+      children: relatedChildren.map(childPayload),
+      childIds: relatedChildren.map((child: any) => child._id.toString())
+    };
+  });
+
+  res.json({
+    success: true,
+    message: 'Admin users',
+    data,
+    meta: {
+      counts: {
+        Parent: roleCounts.find((item) => item._id === 'caregiver')?.count ?? 0,
+        Daycare: roleCounts.find((item) => item._id === 'daycare')?.count ?? 0
+      }
+    },
+    pagination: { page, limit, total, totalPages: Math.ceil(total / limit) }
+  });
+}));
+
+adminRouter.patch(
+  '/users/:userId/status',
+  validate(z.object({ body: z.object({ status: z.enum(['active', 'disabled', 'deleted']) }) })),
+  asyncHandler(async (req, res) => {
+    const user = await User.findOneAndUpdate(
+      { _id: objectIdOrThrow(req.params.userId, 'User id'), userType: { $in: ['caregiver', 'daycare'] } },
+      { $set: { status: req.body.status, deletedAt: req.body.status === 'deleted' ? new Date() : undefined } },
+      { new: true }
+    ).select(publicUserFields);
+    if (!user) throw new AppError('User not found', 404);
+    ok(res, 'User status updated', user);
+  })
+);
+
+adminRouter.delete('/users/:userId', asyncHandler(async (req, res) => {
+  const user = await User.findOneAndUpdate(
+    { _id: objectIdOrThrow(req.params.userId, 'User id'), userType: { $in: ['caregiver', 'daycare'] } },
+    { $set: { status: 'deleted', deletedAt: new Date() } },
+    { new: true }
+  ).select(publicUserFields);
+  if (!user) throw new AppError('User not found', 404);
+  ok(res, 'User deleted', user);
+}));
+
+adminRouter.get('/children', asyncHandler(async (req, res) => {
+  const { page, limit, skip } = paginationFromQuery(req.query);
+  const search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
+  const filter: Record<string, unknown> = { status: { $ne: 'deleted' } };
+  if (search) filter.fullName = { $regex: search, $options: 'i' };
+
+  const [total, children, active, observations] = await Promise.all([
+    Child.countDocuments(filter),
+    Child.find(filter).populate('createdBy', 'fullName email').sort({ createdAt: -1 }).skip(skip).limit(limit),
+    Child.countDocuments({ status: 'active' }),
+    Observation.countDocuments({ status: 'active' })
+  ]);
+
+  const childIds = children.map((child) => child._id);
+  const [observationCounts, milestoneCounts, careCircleCounts, latestObservations] = await Promise.all([
+    Observation.aggregate([{ $match: { childId: { $in: childIds }, status: 'active' } }, { $group: { _id: '$childId', count: { $sum: 1 } } }]),
+    Observation.aggregate([{ $match: { childId: { $in: childIds }, status: 'active', isMilestone: true } }, { $group: { _id: '$childId', count: { $sum: 1 } } }]),
+    CareCircleMembership.aggregate([{ $match: { childId: { $in: childIds }, status: 'active' } }, { $group: { _id: '$childId', count: { $sum: 1 } } }]),
+    Observation.aggregate([{ $match: { childId: { $in: childIds }, status: 'active' } }, { $sort: { occurredAt: -1 } }, { $group: { _id: '$childId', latest: { $first: '$occurredAt' } } }])
+  ]);
+
+  const countMap = new Map(observationCounts.map((item) => [item._id.toString(), item.count]));
+  const milestoneMap = new Map(milestoneCounts.map((item) => [item._id.toString(), item.count]));
+  const careMap = new Map(careCircleCounts.map((item) => [item._id.toString(), item.count]));
+  const latestMap = new Map(latestObservations.map((item) => [item._id.toString(), item.latest]));
+
+  paginated(
+    res,
+    'Admin children',
+    children.map((child: any) => ({
+      id: child._id.toString(),
+      initials: initials(child.fullName),
+      name: child.fullName,
+      age: formatAge(child.dateOfBirth),
+      born: child.dateOfBirth,
+      parents: child.createdBy?.fullName ?? 'Unknown',
+      observations: countMap.get(child._id.toString()) ?? 0,
+      milestones: milestoneMap.get(child._id.toString()) ?? 0,
+      careCircle: careMap.get(child._id.toString()) ?? 0,
+      lastActivity: latestMap.get(child._id.toString()) ?? child.updatedAt,
+      blocked: child.status === 'archived',
+      status: child.status,
+      developmentProgress: child.developmentProgress ?? []
+    })),
+    page,
+    limit,
+    total
+  );
+  res.locals.adminChildrenStats = { total, active, observations };
+}));
+
+adminRouter.get('/children-summary', asyncHandler(async (_req, res) => {
+  const [total, active, observations, ages] = await Promise.all([
+    Child.countDocuments({ status: { $ne: 'deleted' } }),
+    Child.countDocuments({ status: 'active' }),
+    Observation.countDocuments({ status: 'active' }),
+    Child.find({ status: { $ne: 'deleted' } }).select('dateOfBirth').lean()
+  ]);
+  const totalMonths = ages.reduce((sum, child) => {
+    const dob = child.dateOfBirth;
+    const now = new Date();
+    return sum + Math.max(0, (now.getFullYear() - dob.getFullYear()) * 12 + now.getMonth() - dob.getMonth());
+  }, 0);
+  const avgMonths = ages.length ? Math.round(totalMonths / ages.length) : 0;
+  ok(res, 'Admin children summary', {
+    total,
+    active,
+    observations,
+    avgAge: avgMonths >= 12 ? `${Math.round((avgMonths / 12) * 10) / 10} yrs` : `${avgMonths} mos`
+  });
+}));
+
+adminRouter.patch(
+  '/children/:childId/status',
+  validate(z.object({ body: z.object({ status: z.enum(['active', 'archived', 'deleted']) }) })),
+  asyncHandler(async (req, res) => {
+    const child = await Child.findByIdAndUpdate(
+      objectIdOrThrow(req.params.childId, 'Child id'),
+      { $set: { status: req.body.status, deletedAt: req.body.status === 'deleted' ? new Date() : undefined } },
+      { new: true }
+    );
+    if (!child) throw new AppError('Child not found', 404);
+    ok(res, 'Child status updated', child);
+  })
+);
+
+adminRouter.get('/observations', asyncHandler(async (req, res) => {
+  const { page, limit, skip } = paginationFromQuery(req.query);
+  const type = typeof req.query.type === 'string' ? req.query.type : undefined;
+  const search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
+  const filter: Record<string, unknown> = { status: 'active' };
+  if (type && type !== 'All Types') filter.type = type;
+  if (search) filter.$or = [{ title: { $regex: search, $options: 'i' } }, { text: { $regex: search, $options: 'i' } }, { description: { $regex: search, $options: 'i' } }];
+
+  const [total, today, byDaycare, byParent, observations] = await Promise.all([
+    Observation.countDocuments(filter),
+    Observation.countDocuments({ status: 'active', occurredAt: { $gte: startOfDay() } }),
+    Observation.countDocuments({ status: 'active', daycareId: { $exists: true } }),
+    Observation.countDocuments({ status: 'active', daycareId: { $exists: false } }),
+    Observation.find(filter)
+      .populate('childId', 'fullName')
+      .populate('authorId', 'fullName')
+      .populate('domainId', 'name')
+      .sort({ occurredAt: -1 })
+      .skip(skip)
+      .limit(limit)
+  ]);
+
+  res.json({
+    success: true,
+    message: 'Admin observations',
+    data: observations.map((observation: any) => ({
+      id: observation._id.toString(),
+      type: observation.type,
+      title: observation.title || observation.text || 'Untitled observation',
+      subtitle: observation.description || observation.text || '',
+      child: observation.childId?.fullName ?? 'Unknown child',
+      author: observation.authorId?.fullName ?? 'Unknown author',
+      time: observation.occurredAt,
+      tags: [observation.domainId?.name, observation.stage].filter(Boolean),
+      insights: observation.aiMetadata ? 1 : 0,
+      status: observation.aiMetadata ? ['Processed'] : ['Pending']
+    })),
+    stats: { total, today, byDaycare, byParent },
+    pagination: { page, limit, total, totalPages: Math.ceil(total / limit) }
+  });
+}));
+
+adminRouter.delete('/observations/:observationId', asyncHandler(async (req, res) => {
+  const observation = await Observation.findByIdAndUpdate(objectIdOrThrow(req.params.observationId, 'Observation id'), { $set: { status: 'deleted' } }, { new: true });
+  if (!observation) throw new AppError('Observation not found', 404);
+  ok(res, 'Observation deleted', observation);
+}));
+
+adminRouter.get('/notifications', asyncHandler(async (req, res) => {
+  const { page, limit, skip } = paginationFromQuery(req.query);
+  const [total, notifications] = await Promise.all([
+    Notification.countDocuments({}),
+    Notification.find({}).populate('userId', 'fullName email').sort({ createdAt: -1 }).skip(skip).limit(limit)
+  ]);
+  paginated(
+    res,
+    'Admin notifications',
+    notifications.map((notification: any) => ({
+      id: notification._id.toString(),
+      type: notification.type,
+      title: notification.title,
+      message: notification.body ?? '',
+      date: notification.createdAt,
+      read: notification.read,
+      user: notification.userId ? { name: notification.userId.fullName, email: notification.userId.email } : null
+    })),
+    page,
+    limit,
+    total
+  );
+}));
+
+adminRouter.patch('/notifications/:notificationId/read', asyncHandler(async (req, res) => {
+  const notification = await Notification.findByIdAndUpdate(
+    objectIdOrThrow(req.params.notificationId, 'Notification id'),
+    { $set: { read: true, readAt: new Date() } },
+    { new: true }
+  );
+  if (!notification) throw new AppError('Notification not found', 404);
+  ok(res, 'Notification marked read', notification);
+}));
+
+adminRouter.patch('/notifications/read-all', asyncHandler(async (_req, res) => {
+  const result = await Notification.updateMany({ read: false }, { $set: { read: true, readAt: new Date() } });
+  ok(res, 'Notifications marked read', { modifiedCount: result.modifiedCount });
+}));
+
+adminRouter.get('/support/tickets', asyncHandler(async (req, res) => {
+  const { page, limit, skip } = paginationFromQuery(req.query);
+  const [total, issues] = await Promise.all([
+    SupportIssue.countDocuments({}),
+    SupportIssue.find({}).populate('userId', 'fullName email').sort({ updatedAt: -1 }).skip(skip).limit(limit)
+  ]);
+  const userIds = issues.map((issue) => issue.userId?._id).filter(Boolean);
+  const latestMessages = await SupportMessage.aggregate([
+    { $match: { userId: { $in: userIds } } },
+    { $sort: { createdAt: -1 } },
+    { $group: { _id: '$userId', latest: { $first: '$$ROOT' }, count: { $sum: 1 } } }
+  ]);
+  const latestMap = new Map(latestMessages.map((item) => [item._id.toString(), item]));
+
+  paginated(
+    res,
+    'Admin support tickets',
+    issues.map((issue: any) => {
+      const user = issue.userId;
+      const latest = user ? latestMap.get(user._id.toString()) : null;
+      return {
+        id: issue._id.toString(),
+        userId: user?._id?.toString(),
+        title: issue.title,
+        description: issue.description,
+        urgency: issue.urgency,
+        status: issue.status,
+        parentName: user?.fullName ?? 'Unknown user',
+        parentEmail: user?.email ?? '',
+        parentInitials: initials(user?.fullName ?? 'Unknown user'),
+        lastActivity: latest?.latest?.createdAt ?? issue.updatedAt,
+        attachment: issue.attachments?.[0]?.originalName ?? issue.attachments?.[0]?.url ?? null,
+        messageCount: latest?.count ?? 0
+      };
+    }),
+    page,
+    limit,
+    total
+  );
+}));
+
+adminRouter.get('/support/tickets/:userId/messages', asyncHandler(async (req, res) => {
+  const { page, limit, skip } = paginationFromQuery(req.query);
+  const userId = objectIdOrThrow(req.params.userId, 'User id');
+  const [total, messages] = await Promise.all([
+    SupportMessage.countDocuments({ userId }),
+    SupportMessage.find({ userId }).sort({ createdAt: 1 }).skip(skip).limit(limit)
+  ]);
+  paginated(
+    res,
+    'Admin support messages',
+    messages.map((message) => ({
+      id: message._id.toString(),
+      sender: message.sender === 'support' ? 'agent' : 'parent',
+      senderName: message.sender === 'support' ? 'Support Team' : 'Parent',
+      text: message.text,
+      time: message.createdAt
+    })),
+    page,
+    limit,
+    total
+  );
+}));
+
+adminRouter.post(
+  '/support/tickets/:userId/messages',
+  validate(z.object({ body: z.object({ text: z.string().min(1) }) })),
+  asyncHandler(async (req, res) => {
+    const userId = objectIdOrThrow(req.params.userId, 'User id');
+    const message = await SupportMessage.create({ userId, sender: 'support', text: req.body.text, status: 'sent' });
+    ok(res, 'Support reply sent', {
+      id: message._id.toString(),
+      sender: 'agent',
+      senderName: 'Support Team',
+      text: message.text,
+      time: message.createdAt
+    }, 201);
+  })
+);
+
+adminRouter.patch(
+  '/support/tickets/:ticketId/status',
+  validate(z.object({ body: z.object({ status: z.enum(['open', 'in_progress', 'resolved', 'closed']) }) })),
+  asyncHandler(async (req, res) => {
+    const issue = await SupportIssue.findByIdAndUpdate(objectIdOrThrow(req.params.ticketId, 'Ticket id'), { $set: { status: req.body.status } }, { new: true });
+    if (!issue) throw new AppError('Support ticket not found', 404);
+    ok(res, 'Support ticket status updated', issue);
+  })
+);
+
+adminRouter.delete('/support/tickets/:ticketId', asyncHandler(async (req, res) => {
+  const issue = await SupportIssue.findByIdAndDelete(objectIdOrThrow(req.params.ticketId, 'Ticket id'));
+  if (!issue) throw new AppError('Support ticket not found', 404);
+  ok(res, 'Support ticket deleted', issue);
+}));
+
+adminRouter.get('/subscriptions', asyncHandler(async (req, res) => {
+  const { page, limit, skip } = paginationFromQuery(req.query);
+  const status = typeof req.query.status === 'string' ? req.query.status : undefined;
+  const plan = typeof req.query.plan === 'string' ? req.query.plan : undefined;
+  const filter: Record<string, unknown> = {};
+  if (status && status !== 'All Subs') filter.status = status.toLowerCase();
+  if (plan && plan !== 'Plan Type') filter.planName = plan;
+
+  const [total, subscriptions] = await Promise.all([
+    Subscription.countDocuments(filter),
+    Subscription.find(filter).populate('userId', 'fullName email').sort({ updatedAt: -1 }).skip(skip).limit(limit)
+  ]);
+
+  paginated(
+    res,
+    'Admin subscriptions',
+    subscriptions.map((subscription: any) => ({
+      id: subscription._id.toString(),
+      name: subscription.userId?.fullName ?? 'Unknown user',
+      email: subscription.userId?.email ?? '',
+      plan: subscription.planName,
+      date: subscription.renewsAt ?? subscription.updatedAt,
+      payment: subscription.paymentMethodLabel ?? 'Card',
+      status: subscription.status === 'active' ? 'Active' : subscription.status === 'cancelled' ? 'Cancelled' : 'Expiring',
+      amountCents: subscription.amountCents,
+      currency: subscription.currency,
+      interval: subscription.planInterval
+    })),
+    page,
+    limit,
+    total
+  );
+}));
+
+adminRouter.get('/subscriptions/summary', asyncHandler(async (_req, res) => {
+  const [subscriptions, revenueByMonth] = await Promise.all([
+    Subscription.find({}).lean(),
+    Subscription.aggregate([
+      { $match: { status: 'active' } },
+      { $group: { _id: { month: { $month: '$createdAt' }, interval: '$planInterval' }, amount: { $sum: '$amountCents' }, count: { $sum: 1 } } }
+    ])
+  ]);
+
+  const active = subscriptions.filter((subscription) => subscription.status === 'active');
+  const yearly = active.filter((subscription) => subscription.planInterval === 'yearly');
+  const monthly = active.filter((subscription) => subscription.planInterval === 'monthly');
+  const revenue = active.reduce((sum, subscription) => sum + subscription.amountCents, 0);
+  const monthNames = Array.from({ length: 7 }, (_, index) => {
+    const date = new Date();
+    date.setMonth(date.getMonth() - (6 - index));
+    return date;
+  });
+
+  ok(res, 'Admin subscription summary', {
+    metrics: {
+      totalSubscribers: subscriptions.length,
+      monthlyRevenue: revenue / 100,
+      yearlyMembersPercent: active.length ? Math.round((yearly.length / active.length) * 100) : 0,
+      renewalRate: subscriptions.length ? Math.round((active.length / subscriptions.length) * 100) : 0
+    },
+    activePlans: [
+      { name: 'Monthly Membership', price: 29, interval: 'mo', subscribers: monthly.length, conversion: active.length ? Math.round((monthly.length / active.length) * 100) : 0 },
+      { name: 'Yearly Membership', price: 249, interval: 'yr', subscribers: yearly.length, conversion: active.length ? Math.round((yearly.length / active.length) * 100) : 0 }
+    ],
+    revenueGrowth: monthNames.map((date) => {
+      const month = date.getMonth() + 1;
+      const monthlyAmount = revenueByMonth.find((item) => item._id.month === month && item._id.interval === 'monthly')?.amount ?? 0;
+      const yearlyAmount = revenueByMonth.find((item) => item._id.month === month && item._id.interval === 'yearly')?.amount ?? 0;
+      return { month: monthKey(date).toUpperCase(), val1: Math.round(monthlyAmount / 100), val2: Math.round(yearlyAmount / 100) };
+    }),
+    recentActivity: active.slice(0, 5).map((subscription) => ({
+      id: subscription._id.toString(),
+      type: 'success',
+      title: 'Subscription Active',
+      desc: `${subscription.planName} - ${subscription.currency} ${(subscription.amountCents / 100).toFixed(2)}`
+    }))
+  });
+}));
+
+adminRouter.get('/schema', validate(z.object({ query: z.object({ ...paginationQuerySchema }).partial() })), (_req, res) => {
+  ok(res, 'Admin API schema', {
+    routes: [
+      'GET /admin/dashboard',
+      'GET /admin/users',
+      'PATCH /admin/users/:userId/status',
+      'DELETE /admin/users/:userId',
+      'GET /admin/children',
+      'GET /admin/children-summary',
+      'PATCH /admin/children/:childId/status',
+      'GET /admin/observations',
+      'DELETE /admin/observations/:observationId',
+      'GET /admin/notifications',
+      'PATCH /admin/notifications/:notificationId/read',
+      'PATCH /admin/notifications/read-all',
+      'GET /admin/support/tickets',
+      'GET /admin/support/tickets/:userId/messages',
+      'POST /admin/support/tickets/:userId/messages',
+      'PATCH /admin/support/tickets/:ticketId/status',
+      'DELETE /admin/support/tickets/:ticketId',
+      'GET /admin/subscriptions',
+      'GET /admin/subscriptions/summary'
+    ]
+  });
+});

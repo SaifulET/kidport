@@ -16,6 +16,7 @@ import { notificationsRouter } from '../modules/notifications/notifications.rout
 import { reportsRouter } from '../modules/reports/reports.route';
 import { aiRouter } from '../modules/ai/ai.route';
 import { supportRouter } from '../modules/support/support.route';
+import { adminRouter } from '../modules/admin/admin.route';
 import { requireAuth } from '../middlewares/auth';
 import { ok, paginated } from '../utils/apiResponse';
 import { paginationFromQuery } from '../utils/pagination';
@@ -40,6 +41,7 @@ v1Router.use(notificationsRouter);
 v1Router.use(reportsRouter);
 v1Router.use(aiRouter);
 v1Router.use(supportRouter);
+v1Router.use('/admin', adminRouter);
 
 v1Router.delete('/account', requireAuth, async (req, res) => {
   req.user!.status = 'deleted';

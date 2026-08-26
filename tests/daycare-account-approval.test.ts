@@ -1,15 +1,17 @@
 import mongoose from 'mongoose';
 import { MongoMemoryServer } from 'mongodb-memory-server';
 import request from 'supertest';
-import { beforeAll, beforeEach, afterAll, describe, expect, it } from 'vitest';
+import { beforeAll, beforeEach, afterAll, describe, expect, it, vi } from 'vitest';
 import { createApp } from '../src/app';
 import { User } from '../src/modules/users/user.model';
 import { Child } from '../src/modules/children/child.model';
 import { DaycareChildAssignment } from '../src/modules/daycare/daycare-child-assignment.model';
 import { Observation } from '../src/modules/observations/observation.model';
 import { TokenService } from '../src/services/TokenService';
+import { AIAnalysisService } from '../src/services/AIAnalysisService';
 import { CareCircleMembership } from '../src/modules/care-circle/care-circle-membership.model';
 import { Daycare } from '../src/modules/daycare/daycare.model';
+import { DevelopmentDomain } from '../src/modules/domains/development-domain.model';
 
 let mongo: MongoMemoryServer;
 const app = createApp();
@@ -21,6 +23,13 @@ beforeAll(async () => {
 
 beforeEach(async () => {
   await mongoose.connection.dropDatabase();
+  vi.spyOn(AIAnalysisService, 'generateObservationText').mockImplementation(async (input) => input.providedText?.trim() ?? null);
+  vi.spyOn(AIAnalysisService, 'generateObservationDisplay').mockImplementation(async (input) => ({
+    title: input.domain ? `${input.domain} observation` : 'Development observation',
+    description: input.text ?? 'Observation added.',
+    progress: input.stageScore ? input.stageScore * 25 : 0,
+    icon: '*'
+  }));
 });
 
 afterAll(async () => {
@@ -244,6 +253,85 @@ describe('daycare account approval', () => {
       classroom: classroom.body.data._id
     });
 
+    const detailedOwnClassrooms = await request(app)
+      .get('/api/v1/classroom?childrenLimit=1')
+      .set('Authorization', `Bearer ${daycareToken}`)
+      .expect(200);
+    expect(detailedOwnClassrooms.body.data).toHaveLength(1);
+    expect(detailedOwnClassrooms.body.data[0].analytics).toMatchObject({
+      totalChildren: 2,
+      recentObservationsLast7Days: 1,
+      capacity: 12
+    });
+    expect(detailedOwnClassrooms.body.data[0].childrenPagination).toMatchObject({
+      page: 1,
+      limit: 1,
+      count: 1,
+      total: 2,
+      totalPages: 2
+    });
+    expect(detailedOwnClassrooms.body.data[0].children).toHaveLength(1);
+
+    const detailedDaycareClassrooms = await request(app)
+      .get(`/api/v1/daycares/${approval.body.data.daycare._id}/classrooms?childrenLimit=1`)
+      .set('Authorization', `Bearer ${daycareToken}`)
+      .expect(200);
+    expect(detailedDaycareClassrooms.body.data[0].daycare).toMatchObject({
+      _id: approval.body.data.daycare._id,
+      id: approval.body.data.daycare._id,
+      name: approval.body.data.daycare.name
+    });
+
+    const domain = await DevelopmentDomain.create({ name: 'Language & Literacy', slug: 'language-literacy' });
+
+    const daycareObservation = await request(app)
+      .post(`/api/v1/children/${child._id}/observations`)
+      .set('Authorization', `Bearer ${daycareToken}`)
+      .send({
+        observation: 'Ava named three colors during circle time.',
+        keyword: 'steady',
+        domain: domain._id.toString()
+      })
+      .expect(201);
+    expect(daycareObservation.body.data.observation).toBe('Ava named three colors during circle time.');
+
+    const savedDaycareObservation = await Observation.findById(daycareObservation.body.data.id);
+    expect(savedDaycareObservation?.authorRelationship).toBe('daycare');
+    expect(savedDaycareObservation?.daycareId?.toString()).toBe(approval.body.data.daycare._id);
+    expect(savedDaycareObservation?.classroomId?.toString()).toBe(classroom.body.data._id);
+
+    const circleCaregiver = await User.create({
+      fullName: 'Circle Caregiver',
+      email: 'circle@example.com',
+      passwordHash: 'hash',
+      userType: 'caregiver',
+      caregiverRole: 'nanny'
+    });
+    await CareCircleMembership.create({
+      childId: child._id,
+      userId: circleCaregiver._id,
+      role: 'nanny',
+      relationship: 'nanny',
+      invitedBy: parent._id,
+      status: 'active'
+    });
+    const circleToken = TokenService.signAccessToken(circleCaregiver._id);
+
+    const careCircleObservation = await request(app)
+      .post(`/api/v1/children/${child._id}/observations`)
+      .set('Authorization', `Bearer ${circleToken}`)
+      .send({
+        observation: 'Ava used a new word during pickup.',
+        keyword: 'building',
+        domain: domain._id.toString()
+      })
+      .expect(201);
+    expect(careCircleObservation.body.data.observation).toBe('Ava used a new word during pickup.');
+
+    const savedCareCircleObservation = await Observation.findById(careCircleObservation.body.data.id);
+    expect(savedCareCircleObservation?.authorRelationship).toBe('caregiver');
+    expect(savedCareCircleObservation?.daycareId?.toString()).toBe(approval.body.data.daycare._id);
+
     await request(app)
       .get(`/api/v1/classrooms/${classroom.body.data._id}`)
       .set('Authorization', `Bearer ${parentToken}`)
@@ -263,7 +351,7 @@ describe('daycare account approval', () => {
     expect(stats.body.data).toMatchObject({
       daycareId: approval.body.data.daycare._id,
       totalClassrooms: 1,
-      totalObservations: 1,
+      totalObservations: 3,
       totalAssociatedChildren: 2
     });
   });

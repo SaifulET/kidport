@@ -18,6 +18,8 @@ import { AppError } from '../utils/AppError';
 export type CreateObservationInput = {
   childId: string;
   authorId: string;
+  authorRelationship?: string;
+  daycareId?: string;
   type: 'text' | 'voice' | 'photo' | 'video';
   text?: string;
   domainId?: string;
@@ -175,6 +177,15 @@ export class ObservationService {
       input.indicatorId ? DevelopmentIndicator.findById(input.indicatorId).select('title description') : null
     ]);
     if (!child) throw new AppError('Child not found', 404);
+    const assignment = await DaycareChildAssignment.findOne({
+      childId: input.childId,
+      ...(input.daycareId ? { daycareId: input.daycareId } : {}),
+      status: 'active'
+    }).select('daycareId classroomId');
+    const daycareId = input.daycareId ?? child.daycare?.toString() ?? assignment?.daycareId?.toString();
+    const classroomId =
+      child.classroom?.toString() ??
+      (daycareId && assignment?.daycareId?.toString() === daycareId ? assignment.classroomId?.toString() : undefined);
 
     let media: StoredMedia[] = [];
     if (input.files?.length) {
@@ -223,9 +234,9 @@ export class ObservationService {
     const observation = await Observation.create({
       childId: input.childId,
       authorId: input.authorId,
-      authorRelationship: 'caregiver',
-      daycareId: child.daycare,
-      classroomId: child.classroom,
+      authorRelationship: input.authorRelationship ?? 'caregiver',
+      daycareId,
+      classroomId,
       type: input.type,
       text,
       title: display?.title,

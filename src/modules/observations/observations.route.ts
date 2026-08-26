@@ -77,6 +77,9 @@ const inferObservationType = (type: string | undefined, files: Express.Multer.Fi
 
 const shouldReact = (value: unknown) => value === true || value === 'true' || value === 'love';
 
+const currentAuthorRelationship = (user: Express.Request['user']) =>
+  user?.userType === 'daycare' ? 'daycare' : 'caregiver';
+
 const observationStatus = (value: unknown) => {
   const status = cleanString(value);
   if (status === undefined) return undefined;
@@ -103,6 +106,8 @@ observationsRouter.post('/children/:childId/observations', requireChildAccess(),
   const observation = await ObservationService.create({
     childId: req.params.childId,
     authorId: req.user!._id.toString(),
+    authorRelationship: currentAuthorRelationship(req.user),
+    daycareId: req.childAccess?.daycareId,
     type: inferObservationType(req.body.type, files),
     text: req.body.observation ?? req.body.text,
     domainId: req.body.domain ?? req.body.domainId,
@@ -129,6 +134,8 @@ for (const type of ['text', 'voice', 'photo', 'video'] as const) {
     const observation = await ObservationService.create({
       childId: req.params.childId,
       authorId: req.user!._id.toString(),
+      authorRelationship: currentAuthorRelationship(req.user),
+      daycareId: req.childAccess?.daycareId,
       type,
       text: req.body.text,
       domainId: req.body.domainId,

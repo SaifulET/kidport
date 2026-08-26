@@ -1918,13 +1918,41 @@ Auth: required, approved daycare account required
 
 Lists active classrooms for the authenticated daycare user's own daycare. The daycare is resolved from the bearer token.
 
+Optional query: `page`, `limit`, `childrenPage`, `childrenLimit`.
+
+Each classroom is returned in the same detailed shape as `GET /classrooms/:classroomId`, including daycare summary, classroom analytics, child pagination, and children.
+
 Response:
 
 ```json
 {
   "success": true,
   "message": "Classrooms",
-  "data": []
+  "data": [
+    {
+      "_id": "66f...",
+      "name": "Sunflower Room",
+      "daycareId": "66f...",
+      "daycare": {
+        "_id": "66f...",
+        "id": "66f...",
+        "name": "Sunflower Learning Center"
+      },
+      "analytics": {
+        "totalChildren": 12,
+        "recentObservationsLast7Days": 8,
+        "capacity": 12
+      },
+      "childrenPagination": {
+        "page": 1,
+        "limit": 20,
+        "count": 12,
+        "total": 12,
+        "totalPages": 1
+      },
+      "children": []
+    }
+  ]
 }
 ```
 
@@ -1965,13 +1993,41 @@ Response:
 
 Auth: required, daycare member required
 
+Optional query: `page`, `limit`, `childrenPage`, `childrenLimit`.
+
+Each classroom is returned in the same detailed shape as `GET /classrooms/:classroomId`, including daycare summary, classroom analytics, child pagination, and children.
+
 Response:
 
 ```json
 {
   "success": true,
   "message": "Classrooms",
-  "data": []
+  "data": [
+    {
+      "_id": "66f...",
+      "name": "Sunflower Room",
+      "daycareId": "66f...",
+      "daycare": {
+        "_id": "66f...",
+        "id": "66f...",
+        "name": "Sunflower Learning Center"
+      },
+      "analytics": {
+        "totalChildren": 12,
+        "recentObservationsLast7Days": 8,
+        "capacity": 12
+      },
+      "childrenPagination": {
+        "page": 1,
+        "limit": 20,
+        "count": 12,
+        "total": 12,
+        "totalPages": 1
+      },
+      "children": []
+    }
+  ]
 }
 ```
 
@@ -2364,7 +2420,9 @@ The frontend must not send `stageScore`. The backend determines it. If `stage` i
 
 ### POST `/children/:childId/observations`
 
-Auth: required, child access required
+Auth: required, child access required. Child owners, active care-circle caregivers, and active daycare members for a daycare-associated child can create observations.
+
+When an active daycare member creates an observation for an associated child, the observation is linked to that daycare assignment so daycare observation totals include it even before classroom placement.
 
 Content type: `multipart/form-data` or JSON
 

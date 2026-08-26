@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import type { Request } from 'express';
 import { Types } from 'mongoose';
 import { z } from 'zod';
 import { requireAuth } from '../../middlewares/auth';
@@ -54,6 +55,19 @@ const getOwnedDaycareForApprovedUser = async (user: Express.Request['user']) => 
 
 const childIdsFromBody = (body: { childIds?: string[]; children?: string[] }) =>
   [...new Set([...(body.childIds ?? body.children ?? [])].map(String))];
+
+const childPaginationValue = (value: Request['query'][string], field: string) => {
+  const raw = Array.isArray(value) ? value[0] : value;
+  if (raw === undefined) return undefined;
+  if (typeof raw !== 'string') throw new AppError(`${field} must be a number`, 400);
+  return raw;
+};
+
+const childrenPaginationFromQuery = (query: Request['query']) =>
+  paginationFromQuery({
+    page: childPaginationValue(query.childrenPage, 'childrenPage'),
+    limit: childPaginationValue(query.childrenLimit, 'childrenLimit')
+  });
 
 const classroomChildResponse = (child: InstanceType<typeof Child>) => {
   const data = child.toObject();
@@ -169,13 +183,15 @@ classroomsRouter.post('/classroom', validate(classroomSchema), asyncHandler(asyn
 
 classroomsRouter.get('/classroom', asyncHandler(async (req, res) => {
   const { page, limit, skip } = paginationFromQuery(req.query);
+  const childrenPagination = childrenPaginationFromQuery(req.query);
   const daycare = await getOwnedDaycareForApprovedUser(req.user);
   const filter = { daycareId: daycare._id, status: 'active' };
   const [total, classrooms] = await Promise.all([
     Classroom.countDocuments(filter),
     Classroom.find(filter).skip(skip).limit(limit)
   ]);
-  paginated(res, 'Classrooms', classrooms, page, limit, total);
+  const data = await Promise.all(classrooms.map((classroom) => classroomDetailsResponse(classroom, childrenPagination)));
+  paginated(res, 'Classrooms', data, page, limit, total);
 }));
 
 classroomsRouter.post('/daycares/:daycareId/classrooms', requireDaycareAdmin(), validate(classroomSchema), asyncHandler(async (req, res) => {
@@ -185,12 +201,14 @@ classroomsRouter.post('/daycares/:daycareId/classrooms', requireDaycareAdmin(), 
 
 classroomsRouter.get('/daycares/:daycareId/classrooms', requireDaycareAccess(), asyncHandler(async (req, res) => {
   const { page, limit, skip } = paginationFromQuery(req.query);
+  const childrenPagination = childrenPaginationFromQuery(req.query);
   const filter = { daycareId: req.params.daycareId, status: 'active' };
   const [total, classrooms] = await Promise.all([
     Classroom.countDocuments(filter),
     Classroom.find(filter).skip(skip).limit(limit)
   ]);
-  paginated(res, 'Classrooms', classrooms, page, limit, total);
+  const data = await Promise.all(classrooms.map((classroom) => classroomDetailsResponse(classroom, childrenPagination)));
+  paginated(res, 'Classrooms', data, page, limit, total);
 }));
 
 classroomsRouter.get('/classrooms/:classroomId', asyncHandler(async (req, res) => {

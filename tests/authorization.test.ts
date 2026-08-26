@@ -65,6 +65,37 @@ describe('AuthorizationService child access', () => {
     expect(access?.child._id.toString()).toBe(child._id.toString());
   });
 
+  it('allows daycare staff access when the child is linked directly to their daycare', async () => {
+    const owner = await makeUser('owner@example.com');
+    const staff = await makeUser('staff@example.com');
+    const daycare = await Daycare.create({ name: 'Sunflower', ownerId: staff._id });
+    const child = await Child.create({
+      fullName: 'A Child',
+      dateOfBirth: new Date('2022-01-01'),
+      createdBy: owner._id,
+      daycare: daycare._id
+    });
+    await DaycareMember.create({ daycareId: daycare._id, userId: staff._id, role: 'daycare_employee' });
+
+    const access = await AuthorizationService.getChildAccess(staff._id.toString(), child._id.toString());
+    expect(access?.daycareId).toBe(daycare._id.toString());
+  });
+
+  it('allows the daycare owner access even if the daycare member record is missing', async () => {
+    const owner = await makeUser('owner@example.com');
+    const daycareOwner = await makeUser('daycare-owner@example.com');
+    const daycare = await Daycare.create({ name: 'Sunflower', ownerId: daycareOwner._id });
+    const child = await Child.create({
+      fullName: 'A Child',
+      dateOfBirth: new Date('2022-01-01'),
+      createdBy: owner._id,
+      daycare: daycare._id
+    });
+
+    const access = await AuthorizationService.getChildAccess(daycareOwner._id.toString(), child._id.toString());
+    expect(access?.daycareId).toBe(daycare._id.toString());
+  });
+
   it('does not allow pending daycare members to access or manage daycare records', async () => {
     const admin = await makeUser('admin@example.com');
     const staff = await makeUser('staff@example.com');

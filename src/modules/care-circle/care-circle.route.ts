@@ -6,26 +6,174 @@ import { validate } from '../../middlewares/validate';
 import { asyncHandler } from '../../utils/asyncHandler';
 import { AppError } from '../../utils/AppError';
 import { ok, paginated } from '../../utils/apiResponse';
-import { paginationFromQuery } from '../../utils/pagination';
+import { paginateArray, paginationFromQuery } from '../../utils/pagination';
 import { randomToken, hashToken } from '../../utils/crypto';
 import { EmailService } from '../../services/EmailService';
 import { InvitationWorkflowService } from '../../services/ObservationService';
 import { NotificationService } from '../../services/NotificationService';
 import { User } from '../users/user.model';
 import { Child } from '../children/child.model';
+import { Daycare } from '../daycare/daycare.model';
+import { DaycareChildAssignment } from '../daycare/daycare-child-assignment.model';
+import { DaycareMember } from '../daycare/daycare-member.model';
 import { CareCircleMembership } from './care-circle-membership.model';
 import { Invitation } from './invitation.model';
 
 export const careCircleRouter = Router();
 
-careCircleRouter.get('/children/:childId/care-circle', requireAuth, requireChildAccess(), asyncHandler(async (req, res) => {
-  const { page, limit, skip } = paginationFromQuery(req.query);
-  const filter = { childId: req.params.childId, status: 'active' };
-  const [total, members] = await Promise.all([
-    CareCircleMembership.countDocuments(filter),
-    CareCircleMembership.find(filter).populate('userId', 'fullName email profilePhoto caregiverRole daycareRole').skip(skip).limit(limit)
+const userFields = 'fullName email profilePhoto caregiverRole daycareRole userType';
+
+const defaultPermissions = (canManage = false) => ({
+  canView: true,
+  canComment: true,
+  canObserve: true,
+  canInvite: canManage,
+  canManage
+});
+
+const userIdString = (value: unknown) => {
+  const user = value as { _id?: unknown; toString?: () => string } | undefined;
+  const raw = user && typeof user === 'object' && '_id' in user ? user._id : user;
+  return raw?.toString?.();
+};
+
+const serializeUser = (user: unknown) => {
+  if (!user || typeof user !== 'object') return null;
+  const data = user as Record<string, any>;
+  return {
+    _id: data._id?.toString?.() ?? data.id?.toString?.() ?? null,
+    fullName: data.fullName ?? null,
+    email: data.email ?? null,
+    caregiverRole: data.caregiverRole ?? undefined,
+    daycareRole: data.daycareRole ?? undefined,
+    userType: data.userType ?? undefined,
+    profilePhoto: typeof data.profilePhoto === 'string' ? data.profilePhoto : data.profilePhoto?.url ?? null
+  };
+};
+
+const careCirclePayload = async (childId: string) => {
+  const [child, memberships, assignments] = await Promise.all([
+    Child.findById(childId).select('createdBy caregivers daycare').lean(),
+    CareCircleMembership.find({ childId, status: 'active' }).populate('userId', userFields).lean(),
+    DaycareChildAssignment.find({ childId, status: 'active' }).select('daycareId classroomId acceptedAt createdAt updatedAt').lean()
   ]);
-  paginated(res, 'Care circle', members, page, limit, total);
+  if (!child) throw new AppError('Child not found', 404);
+
+  const byKey = new Map<string, Record<string, unknown>>();
+  const addEntry = (key: string, entry: Record<string, unknown>) => {
+    if (!byKey.has(key)) byKey.set(key, entry);
+  };
+
+  for (const membership of memberships) {
+    const id = userIdString(membership.userId);
+    if (!id) continue;
+    addEntry(`user:${id}`, {
+      ...membership,
+      _id: membership._id?.toString?.(),
+      childId,
+      userId: serializeUser(membership.userId),
+      source: 'care_circle'
+    });
+  }
+
+  const childUserIds = [...new Set([
+    child.createdBy?.toString?.(),
+    ...(child.caregivers ?? []).map((id: unknown) => id?.toString?.())
+  ].filter(Boolean))] as string[];
+  const missingChildUserIds = childUserIds.filter((id) => !byKey.has(`user:${id}`));
+  if (missingChildUserIds.length) {
+    const users = await User.find({ _id: { $in: missingChildUserIds }, status: { $ne: 'deleted' } }).select(userFields).lean();
+    for (const user of users) {
+      const id = user._id.toString();
+      const isOwner = child.createdBy?.toString?.() === id;
+      addEntry(`user:${id}`, {
+        _id: `child-user:${childId}:${id}`,
+        childId,
+        userId: serializeUser(user),
+        role: user.caregiverRole ?? 'parent',
+        relationship: user.caregiverRole ?? 'parent',
+        permissions: defaultPermissions(isOwner),
+        status: 'active',
+        source: isOwner ? 'child_owner' : 'child_caregiver'
+      });
+    }
+  }
+
+  const daycareIds = [...new Set([
+    child.daycare?.toString?.(),
+    ...assignments.map((assignment) => assignment.daycareId?.toString?.())
+  ].filter(Boolean))] as string[];
+  if (daycareIds.length) {
+    const [daycares, daycareMembers] = await Promise.all([
+      Daycare.find({ _id: { $in: daycareIds }, status: { $ne: 'deleted' } }).select('name email phoneNumber ownerId status').lean(),
+      DaycareMember.find({ daycareId: { $in: daycareIds }, status: 'active' }).populate('userId', userFields).lean()
+    ]);
+    const daycareById = new Map(daycares.map((daycare) => [daycare._id.toString(), daycare]));
+    const memberDaycareUserKeys = new Set<string>();
+
+    for (const member of daycareMembers) {
+      const daycareId = member.daycareId.toString();
+      const daycare = daycareById.get(daycareId);
+      const id = userIdString(member.userId);
+      if (!daycare || !id) continue;
+      memberDaycareUserKeys.add(`${daycareId}:${id}`);
+      addEntry(`daycare:${daycareId}:user:${id}`, {
+        _id: `daycare-member:${daycareId}:${id}`,
+        childId,
+        userId: serializeUser(member.userId),
+        role: member.role,
+        relationship: 'daycare',
+        permissions: defaultPermissions(member.role === 'daycare_admin'),
+        status: 'active',
+        daycare: {
+          _id: daycare._id.toString(),
+          name: daycare.name,
+          email: daycare.email ?? null,
+          phoneNumber: daycare.phoneNumber ?? null
+        },
+        source: 'daycare'
+      });
+    }
+
+    const ownerIds = daycares
+      .filter((daycare) => !memberDaycareUserKeys.has(`${daycare._id.toString()}:${daycare.ownerId.toString()}`))
+      .map((daycare) => daycare.ownerId.toString());
+    const owners = ownerIds.length
+      ? await User.find({ _id: { $in: ownerIds }, status: { $ne: 'deleted' } }).select(userFields).lean()
+      : [];
+    const ownerById = new Map(owners.map((owner) => [owner._id.toString(), owner]));
+
+    for (const daycare of daycares) {
+      const owner = ownerById.get(daycare.ownerId.toString());
+      if (!owner) continue;
+      const daycareId = daycare._id.toString();
+      const id = owner._id.toString();
+      addEntry(`daycare:${daycareId}:user:${id}`, {
+        _id: `daycare-owner:${daycareId}:${id}`,
+        childId,
+        userId: serializeUser(owner),
+        role: 'daycare_admin',
+        relationship: 'daycare',
+        permissions: defaultPermissions(true),
+        status: 'active',
+        daycare: {
+          _id: daycareId,
+          name: daycare.name,
+          email: daycare.email ?? null,
+          phoneNumber: daycare.phoneNumber ?? null
+        },
+        source: 'daycare'
+      });
+    }
+  }
+
+  return Array.from(byKey.values());
+};
+
+careCircleRouter.get('/children/:childId/care-circle', requireAuth, requireChildAccess(), asyncHandler(async (req, res) => {
+  const { page, limit } = paginationFromQuery(req.query);
+  const members = await careCirclePayload(req.params.childId);
+  paginated(res, 'Care circle', paginateArray(members, page, limit), page, limit, members.length);
 }));
 
 careCircleRouter.post(

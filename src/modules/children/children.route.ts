@@ -629,7 +629,7 @@ childrenRouter.get('/children/:childId/milestones', requireChildAccess(), asyncH
   const { page, limit, skip } = paginationFromQuery(req.query);
   const filter: Record<string, unknown> = { childId: req.params.childId, isMilestone: true, status: 'active' };
   if (req.query.domain) filter.domainId = req.query.domain;
-  const [total, milestones] = await Promise.all([
+  const [total, milestones, analytics] = await Promise.all([
     Observation.countDocuments(filter),
     Observation.find(filter)
       .populate('childId', 'fullName nickname profilePhoto dateOfBirth gender')
@@ -637,10 +637,17 @@ childrenRouter.get('/children/:childId/milestones', requireChildAccess(), asyncH
       .populate('authorId', 'fullName email profilePhoto caregiverRole daycareRole userType')
       .sort({ occurredAt: -1 })
       .skip(skip)
-      .limit(limit)
+      .limit(limit),
+    childObservationAnalytics(req.params.childId, req.query)
   ]);
   const counts = await SocialResponseService.observationCountMaps(milestones.map((item) => item._id));
-  paginated(res, 'Milestones', SocialResponseService.observations(milestones, counts), page, limit, total);
+  res.json({
+    success: true,
+    message: 'Milestones',
+    data: SocialResponseService.observations(milestones, counts),
+    analytics,
+    pagination: { page, limit, total, totalPages: Math.ceil(total / limit) }
+  });
 }));
 
 childrenRouter.get('/children/:childId/achievements', requireChildAccess(), asyncHandler(async (req, res) => {

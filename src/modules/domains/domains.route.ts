@@ -5,6 +5,7 @@ import { validate } from '../../middlewares/validate';
 import { asyncHandler } from '../../utils/asyncHandler';
 import { ok, paginated } from '../../utils/apiResponse';
 import { paginationFromQuery } from '../../utils/pagination';
+import { NotificationService } from '../../services/NotificationService';
 import { DevelopmentDomain } from './development-domain.model';
 import { DevelopmentIndicator } from './development-indicator.model';
 import { AgeBand } from './age-band.model';
@@ -33,7 +34,11 @@ domainsRouter.post(
   validate(z.object({ body: z.object({ name: z.string().min(1) }) })),
   asyncHandler(async (req, res) => {
     const name = req.body.name.trim();
-    ok(res, 'Domain created', await DevelopmentDomain.create({ name, slug: slugify(name) }), 201);
+    const domain = await DevelopmentDomain.create({ name, slug: slugify(name) });
+    void NotificationService.createDomainCreatedNotifications(domain._id.toString(), domain.name, req.user!._id.toString()).catch((error) => {
+      console.error('Failed to create domain notifications', error);
+    });
+    ok(res, 'Domain created', domain, 201);
   })
 );
 domainsRouter.patch('/domains/:domainId', asyncHandler(async (req, res) => ok(res, 'Domain updated', await DevelopmentDomain.findByIdAndUpdate(req.params.domainId, { $set: req.body }, { new: true }))));

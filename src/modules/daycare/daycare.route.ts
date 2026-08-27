@@ -17,6 +17,7 @@ import { Classroom } from '../classrooms/classroom.model';
 import { Observation } from '../observations/observation.model';
 import { User } from '../users/user.model';
 import { Invitation } from '../care-circle/invitation.model';
+import { Notification } from '../notifications/notification.model';
 
 export const daycareRouter = Router();
 daycareRouter.use(requireAuth);
@@ -91,6 +92,52 @@ const requireDaycareOwner = asyncHandler(async (req, _res, next) => {
   if (daycare.ownerId.toString() !== req.user!._id.toString()) throw new AppError('Only the daycare owner can manage this daycare', 403);
   next();
 });
+
+daycareRouter.get('/daycare/notifications', requireDaycareAccount, asyncHandler(async (req, res) => {
+  const { page, limit, skip } = paginationFromQuery(req.query);
+  const filter = { userId: req.user!._id };
+  const [total, notifications] = await Promise.all([
+    Notification.countDocuments(filter),
+    Notification.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit)
+  ]);
+  paginated(res, 'Daycare notifications', notifications, page, limit, total);
+}));
+
+daycareRouter.get('/daycare/notifications/unread-count', requireDaycareAccount, asyncHandler(async (req, res) => {
+  ok(res, 'Daycare unread notification count', {
+    count: await Notification.countDocuments({ userId: req.user!._id, read: false })
+  });
+}));
+
+daycareRouter.patch('/daycare/notifications/read-all', requireDaycareAccount, asyncHandler(async (req, res) => {
+  const result = await Notification.updateMany(
+    { userId: req.user!._id, read: false },
+    { $set: { read: true, readAt: new Date() } }
+  );
+  ok(res, 'Daycare notifications marked read', { modifiedCount: result.modifiedCount });
+}));
+
+daycareRouter.delete('/daycare/notifications/clear-all', requireDaycareAccount, asyncHandler(async (req, res) => {
+  const result = await Notification.deleteMany({ userId: req.user!._id });
+  ok(res, 'Daycare notifications cleared', { deletedCount: result.deletedCount });
+}));
+
+daycareRouter.patch('/daycare/notifications/:notificationId/read', requireDaycareAccount, asyncHandler(async (req, res) => {
+  ok(
+    res,
+    'Daycare notification read',
+    await Notification.findOneAndUpdate(
+      { _id: req.params.notificationId, userId: req.user!._id },
+      { $set: { read: true, readAt: new Date() } },
+      { new: true }
+    )
+  );
+}));
+
+daycareRouter.delete('/daycare/notifications/:notificationId', requireDaycareAccount, asyncHandler(async (req, res) => {
+  const result = await Notification.deleteOne({ _id: req.params.notificationId, userId: req.user!._id });
+  ok(res, 'Daycare notification deleted', { deletedCount: result.deletedCount });
+}));
 
 daycareRouter.get('/daycares', asyncHandler(async (req, res) => {
   const { page, limit, skip } = paginationFromQuery(req.query);

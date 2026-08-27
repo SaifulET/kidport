@@ -19,6 +19,8 @@ import { SupportIssue } from '../support/support-issue.model';
 import { SupportMessage } from '../support/support-message.model';
 import { Subscription } from '../subscriptions/subscription.model';
 import { User } from '../users/user.model';
+import { DevelopmentDomain } from '../domains/development-domain.model';
+import { NotificationService } from '../../services/NotificationService';
 
 export const adminRouter = Router();
 
@@ -67,6 +69,13 @@ const objectIdOrThrow = (id: string, label: string) => {
   if (!Types.ObjectId.isValid(id)) throw new AppError(`${label} is invalid`, 400);
   return new Types.ObjectId(id);
 };
+
+const slugify = (value: string) =>
+  value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/(^-|-$)/g, '');
 
 const userRoleLabel = (userType: string) => (userType === 'daycare' ? 'Daycare' : userType === 'admin' ? 'Admin' : 'Parent');
 const userStatus = (status: string) => (status === 'disabled' ? 'Blocked' : status === 'deleted' ? 'Deleted' : status === 'pending' ? 'Pending' : 'Active');
@@ -441,7 +450,7 @@ adminRouter.get('/observations', asyncHandler(async (req, res) => {
     Observation.find(filter)
       .populate('childId', 'fullName')
       .populate('authorId', 'fullName')
-      .populate('domainId', 'name')
+      .populate('domainId', 'name slug')
       .sort({ occurredAt: -1 })
       .skip(skip)
       .limit(limit)
@@ -458,6 +467,14 @@ adminRouter.get('/observations', asyncHandler(async (req, res) => {
       child: observation.childId?.fullName ?? 'Unknown child',
       author: observation.authorId?.fullName ?? 'Unknown author',
       time: observation.occurredAt,
+      domain: observation.domainId
+        ? {
+            id: observation.domainId._id?.toString?.() ?? observation.domainId.toString(),
+            name: observation.domainId.name ?? null
+          }
+        : null,
+      domainId: observation.domainId?._id?.toString?.() ?? observation.domainId?.toString?.() ?? null,
+      domainName: observation.domainId?.name ?? null,
       tags: [observation.domainId?.name, observation.stage].filter(Boolean),
       insights: observation.aiMetadata ? 1 : 0,
       status: observation.aiMetadata ? ['Processed'] : ['Pending']
@@ -471,6 +488,129 @@ adminRouter.delete('/observations/:observationId', asyncHandler(async (req, res)
   const observation = await Observation.findByIdAndUpdate(objectIdOrThrow(req.params.observationId, 'Observation id'), { $set: { status: 'deleted' } }, { new: true });
   if (!observation) throw new AppError('Observation not found', 404);
   ok(res, 'Observation deleted', observation);
+}));
+
+adminRouter.get('/domains', asyncHandler(async (req, res) => {
+  const { page, limit, skip } = paginationFromQuery(req.query);
+  const filter = { status: 'active' };
+  const [total, domains] = await Promise.all([
+    DevelopmentDomain.countDocuments(filter),
+    DevelopmentDomain.find(filter).sort({ sortOrder: 1, name: 1 }).skip(skip).limit(limit)
+  ]);
+
+  const domainIds = domains.map((domain) => domain._id);
+  const observationCounts = await Observation.aggregate([
+    { $match: { status: 'active', domainId: { $in: domainIds } } },
+    { $group: { _id: '$domainId', count: { $sum: 1 } } }
+  ]);
+  const countMap = new Map(observationCounts.map((item) => [item._id.toString(), item.count]));
+
+  paginated(
+    res,
+    'Admin domains',
+    domains.map((domain) => ({
+      id: domain._id.toString(),
+      name: domain.name,
+      slug: domain.slug,
+      description: domain.description ?? '',
+      sortOrder: domain.sortOrder ?? 0,
+      status: domain.status,
+      observationCount: countMap.get(domain._id.toString()) ?? 0,
+      createdAt: domain.createdAt,
+      updatedAt: domain.updatedAt
+    })),
+    page,
+    limit,
+    total
+  );
+}));
+
+adminRouter.post(
+  '/domains',
+  validate(z.object({ body: z.object({ name: z.string().trim().min(1, 'Domain name is required') }) })),
+  asyncHandler(async (req, res) => {
+    const name = req.body.name.trim();
+    const slug = slugify(name);
+    if (!slug) throw new AppError('Domain name must include letters or numbers', 400);
+
+    const existing = await DevelopmentDomain.findOne({ slug });
+    if (existing?.status === 'active') throw new AppError('Domain already exists', 409);
+
+    const domain = existing
+      ? await DevelopmentDomain.findByIdAndUpdate(existing._id, { $set: { name, slug, status: 'active' } }, { new: true })
+      : await DevelopmentDomain.create({ name, slug });
+    const observationCount = await Observation.countDocuments({ status: 'active', domainId: domain!._id });
+    void NotificationService.createDomainCreatedNotifications(domain!._id.toString(), domain!.name, req.user!._id.toString()).catch((error) => {
+      console.error('Failed to create domain notifications', error);
+    });
+
+    ok(res, 'Domain created', {
+      id: domain!._id.toString(),
+      name: domain!.name,
+      slug: domain!.slug,
+      description: domain!.description ?? '',
+      sortOrder: domain!.sortOrder ?? 0,
+      status: domain!.status,
+      observationCount,
+      createdAt: domain!.createdAt,
+      updatedAt: domain!.updatedAt
+    }, 201);
+  })
+);
+
+adminRouter.patch(
+  '/domains/:domainId',
+  validate(z.object({
+    params: z.object({ domainId: z.string().refine((value) => Types.ObjectId.isValid(value), 'Domain id must be valid') }),
+    body: z.object({ name: z.string().trim().min(1, 'Domain name is required') })
+  })),
+  asyncHandler(async (req, res) => {
+    const domainId = objectIdOrThrow(req.params.domainId, 'Domain id');
+    const name = req.body.name.trim();
+    const slug = slugify(name);
+    if (!slug) throw new AppError('Domain name must include letters or numbers', 400);
+
+    const duplicate = await DevelopmentDomain.findOne({ _id: { $ne: domainId }, slug });
+    if (duplicate) throw new AppError('Domain already exists', 409);
+
+    const domain = await DevelopmentDomain.findOneAndUpdate(
+      { _id: domainId, status: 'active' },
+      { $set: { name, slug } },
+      { new: true }
+    );
+    if (!domain) throw new AppError('Domain not found', 404);
+
+    const observationCount = await Observation.countDocuments({ status: 'active', domainId: domain._id });
+    ok(res, 'Domain updated', {
+      id: domain._id.toString(),
+      name: domain.name,
+      slug: domain.slug,
+      description: domain.description ?? '',
+      sortOrder: domain.sortOrder ?? 0,
+      status: domain.status,
+      observationCount,
+      createdAt: domain.createdAt,
+      updatedAt: domain.updatedAt
+    });
+  })
+);
+
+adminRouter.delete('/domains/:domainId', asyncHandler(async (req, res) => {
+  const domain = await DevelopmentDomain.findOneAndUpdate(
+    { _id: objectIdOrThrow(req.params.domainId, 'Domain id'), status: 'active' },
+    { $set: { status: 'inactive' } },
+    { new: true }
+  );
+  if (!domain) throw new AppError('Domain not found', 404);
+
+  const observationCount = await Observation.countDocuments({ status: 'active', domainId: domain._id });
+  ok(res, 'Domain deleted', {
+    id: domain._id.toString(),
+    name: domain.name,
+    slug: domain.slug,
+    status: domain.status,
+    observationCount
+  });
 }));
 
 adminRouter.get('/notifications', asyncHandler(async (req, res) => {
@@ -704,6 +844,10 @@ adminRouter.get('/schema', validate(z.object({ query: z.object({ ...paginationQu
       'PATCH /admin/children/:childId/status',
       'GET /admin/observations',
       'DELETE /admin/observations/:observationId',
+      'GET /admin/domains',
+      'POST /admin/domains',
+      'PATCH /admin/domains/:domainId',
+      'DELETE /admin/domains/:domainId',
       'GET /admin/notifications',
       'PATCH /admin/notifications/:notificationId/read',
       'PATCH /admin/notifications/read-all',

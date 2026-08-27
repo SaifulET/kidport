@@ -171,10 +171,11 @@ export class ObservationService {
     const isDraft = status === 'draft';
     const domainId = await this.resolveDomainId(input.domainId);
     await this.validateDomainIndicator(domainId, input.indicatorId);
-    const [child, domain, indicator] = await Promise.all([
+    const [child, domain, indicator, author] = await Promise.all([
       Child.findById(input.childId),
       domainId ? DevelopmentDomain.findById(domainId).select('name') : null,
-      input.indicatorId ? DevelopmentIndicator.findById(input.indicatorId).select('title description') : null
+      input.indicatorId ? DevelopmentIndicator.findById(input.indicatorId).select('title description') : null,
+      User.findById(input.authorId).select('fullName userType')
     ]);
     if (!child) throw new AppError('Child not found', 404);
     const assignment = await DaycareChildAssignment.findOne({
@@ -263,12 +264,27 @@ export class ObservationService {
         : undefined
     });
 
-    if (isMilestone) {
-      const membershipUserIds = await CareCircleMembership.find({ childId: input.childId, status: 'active' }).distinct('userId');
-      const recipients = [child.createdBy.toString(), ...membershipUserIds.map(String)];
-      await NotificationService.createMany([...new Set(recipients)], 'milestone_achieved', 'New milestone achieved', `${child.fullName} reached a confident milestone.`, {
+    if (!isDraft) {
+      await NotificationService.createObservationNotifications({
         childId: input.childId,
-        observationId: observation._id.toString()
+        observationId: observation._id.toString(),
+        daycareId,
+        actorId: input.authorId,
+        actorName: author?.fullName,
+        childName: child.fullName,
+        domainName: domain?.name,
+        observationType: input.type
+      });
+    }
+
+    if (isMilestone) {
+      await NotificationService.createMilestoneNotifications({
+        childId: input.childId,
+        observationId: observation._id.toString(),
+        daycareId,
+        actorId: input.authorId,
+        childName: child.fullName,
+        domainName: domain?.name
       });
       await NotificationService.createForAdmins('milestone_achieved', 'New milestone achieved', `${child.fullName} reached a confident milestone.`, {
         childId: input.childId,
@@ -310,10 +326,11 @@ export class ObservationService {
     const indicatorId = input.indicatorId !== undefined ? input.indicatorId : observation.indicatorId?.toString();
     await this.validateDomainIndicator(domainId, indicatorId);
 
-    const [child, domain, indicator] = await Promise.all([
+    const [child, domain, indicator, author] = await Promise.all([
       Child.findById(observation.childId),
       domainId ? DevelopmentDomain.findById(domainId).select('name') : null,
-      indicatorId ? DevelopmentIndicator.findById(indicatorId).select('title description') : null
+      indicatorId ? DevelopmentIndicator.findById(indicatorId).select('title description') : null,
+      User.findById(input.userId).select('fullName userType')
     ]);
     if (!child) throw new AppError('Child not found', 404);
 
@@ -382,12 +399,25 @@ export class ObservationService {
     await observation.save();
 
     if (status === 'active') {
+      await NotificationService.createObservationNotifications({
+        childId: observation.childId.toString(),
+        observationId: observation._id.toString(),
+        daycareId: observation.daycareId?.toString(),
+        actorId: input.userId,
+        actorName: author?.fullName,
+        childName: child.fullName,
+        domainName: domain?.name,
+        observationType: input.type ?? observation.type
+      });
+
       if (isMilestone) {
-        const membershipUserIds = await CareCircleMembership.find({ childId: observation.childId, status: 'active' }).distinct('userId');
-        const recipients = [child.createdBy.toString(), ...membershipUserIds.map(String)];
-        await NotificationService.createMany([...new Set(recipients)], 'milestone_achieved', 'New milestone achieved', `${child.fullName} reached a confident milestone.`, {
+        await NotificationService.createMilestoneNotifications({
           childId: observation.childId.toString(),
-          observationId: observation._id.toString()
+          observationId: observation._id.toString(),
+          daycareId: observation.daycareId?.toString(),
+          actorId: input.userId,
+          childName: child.fullName,
+          domainName: domain?.name
         });
         await NotificationService.createForAdmins('milestone_achieved', 'New milestone achieved', `${child.fullName} reached a confident milestone.`, {
           childId: observation.childId.toString(),

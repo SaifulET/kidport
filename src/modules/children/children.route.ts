@@ -63,6 +63,7 @@ const queueCareCircleInvitation = async (input: {
   role: string;
   message?: string;
   invitedById: string;
+  invitedByName?: string;
   invitedByEmail: string;
 }) => {
   const email = input.email.toLowerCase().trim();
@@ -103,6 +104,16 @@ const queueCareCircleInvitation = async (input: {
   void EmailService.careCircleInvite(email, token, child.fullName, input.role, input.message).catch((error) => {
     console.error('Failed to send care circle invitation email', error);
   });
+  void NotificationService.createChildInvitationNotifications({
+    childId: input.childId,
+    invitationId: invitation._id.toString(),
+    actorId: input.invitedById,
+    actorName: input.invitedByName,
+    childName: child.fullName,
+    invitedEmail: email,
+    invitationType: 'care_circle',
+    role: input.role
+  }).catch((error) => console.error('Failed to create care circle invitation notifications', error));
 
   return { invitationId: invitation._id, emailStatus: 'queued', type: 'care_circle' };
 };
@@ -128,7 +139,7 @@ const resolveApprovedDaycare = async (daycareIdOrOwnerId: string) => {
   return { daycare: ownerDaycare, daycareOwner };
 };
 
-const queueDaycareInvitation = async (input: { childId: string; daycareId: string; message?: string; invitedById: string }) => {
+const queueDaycareInvitation = async (input: { childId: string; daycareId: string; message?: string; invitedById: string; invitedByName?: string }) => {
   const { daycare, daycareOwner } = await resolveApprovedDaycare(input.daycareId);
   const child = await Child.findById(input.childId);
   if (!child) throw new AppError('Child not found', 404);
@@ -168,6 +179,16 @@ const queueDaycareInvitation = async (input: { childId: string; daycareId: strin
   void EmailService.daycareInvite(invitation.email, token, child.fullName).catch((error) => {
     console.error('Failed to send daycare invitation email', error);
   });
+  void NotificationService.createChildInvitationNotifications({
+    childId: input.childId,
+    invitationId: invitation._id.toString(),
+    daycareId: daycare._id.toString(),
+    actorId: input.invitedById,
+    actorName: input.invitedByName,
+    childName: child.fullName,
+    invitedEmail: invitation.email,
+    invitationType: 'daycare_child_assignment'
+  }).catch((error) => console.error('Failed to create daycare invitation notifications', error));
 
   return { invitationId: invitation._id, emailStatus: 'queued', type: 'daycare_child_assignment' };
 };
@@ -532,7 +553,7 @@ childrenRouter.get('/children/:childId/dashboard', requireChildAccess(), asyncHa
     DevelopmentScoringService.calculateObservationSummary(req.params.childId),
     CareCircleMembership.find({ childId: req.params.childId, status: 'active' }).populate('userId', 'fullName profilePhoto caregiverRole daycareRole'),
     Observation.find({ childId: req.params.childId, status: 'active' })
-      .populate('childId domainId indicatorId', 'fullName nickname profilePhoto name title')
+      .populate('childId domainId indicatorId', 'fullName nickname profilePhoto name slug title')
       .populate('authorId', 'fullName profilePhoto caregiverRole daycareRole userType')
       .sort({ createdAt: -1 })
       .limit(10)
@@ -563,7 +584,7 @@ childrenRouter.get('/children/:childId/activities', requireChildAccess(), asyncH
     keywordCountsForObservationFilter(filter)
   ]);
   const activities = await Observation.find(filter)
-    .populate('childId domainId indicatorId', 'fullName nickname profilePhoto name title')
+    .populate('childId domainId indicatorId', 'fullName nickname profilePhoto name slug title')
     .populate('authorId', 'fullName profilePhoto caregiverRole daycareRole userType')
     .sort({ createdAt: -1 })
     .skip(skip)
@@ -587,7 +608,7 @@ childrenRouter.get('/children/:childId/activity-history', requireChildAccess(), 
   const [total, activities, keywordCounts] = await Promise.all([
     Observation.countDocuments(filter),
     Observation.find(filter)
-      .populate('childId domainId indicatorId', 'fullName nickname profilePhoto name title')
+      .populate('childId domainId indicatorId', 'fullName nickname profilePhoto name slug title')
       .populate('authorId', 'fullName profilePhoto caregiverRole daycareRole userType')
       .sort({ occurredAt: -1 })
       .skip(skip)
@@ -612,7 +633,7 @@ childrenRouter.get('/children/:childId/milestones', requireChildAccess(), asyncH
     Observation.countDocuments(filter),
     Observation.find(filter)
       .populate('childId', 'fullName nickname profilePhoto dateOfBirth gender')
-      .populate('domainId indicatorId', 'name title')
+      .populate('domainId indicatorId', 'name slug title')
       .populate('authorId', 'fullName email profilePhoto caregiverRole daycareRole userType')
       .sort({ occurredAt: -1 })
       .skip(skip)
@@ -629,7 +650,7 @@ childrenRouter.get('/children/:childId/achievements', requireChildAccess(), asyn
     Observation.countDocuments(filter),
     Observation.find(filter)
       .populate('childId', 'fullName nickname profilePhoto dateOfBirth gender')
-      .populate('domainId indicatorId', 'name title')
+      .populate('domainId indicatorId', 'name slug title')
       .populate('authorId', 'fullName email profilePhoto caregiverRole daycareRole userType')
       .sort({ occurredAt: -1 })
       .skip(skip)
@@ -678,7 +699,8 @@ childrenRouter.post(
           childId: req.params.childId,
           daycareId: req.body.daycareId,
           message: req.body.message,
-          invitedById: req.user!._id.toString()
+          invitedById: req.user!._id.toString(),
+          invitedByName: req.user!.fullName
         })
       : await queueCareCircleInvitation({
           childId: req.params.childId,
@@ -686,6 +708,7 @@ childrenRouter.post(
           role: req.body.role as string,
           message: req.body.message,
           invitedById: req.user!._id.toString(),
+          invitedByName: req.user!.fullName,
           invitedByEmail: req.user!.email
         });
 
@@ -702,7 +725,8 @@ childrenRouter.post(
       childId: req.params.childId,
       daycareId: req.body.daycareId,
       message: req.body.message,
-      invitedById: req.user!._id.toString()
+      invitedById: req.user!._id.toString(),
+      invitedByName: req.user!.fullName
     });
     ok(res, 'Daycare invitation queued', data, 201);
   })

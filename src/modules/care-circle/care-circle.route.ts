@@ -10,6 +10,7 @@ import { paginationFromQuery } from '../../utils/pagination';
 import { randomToken, hashToken } from '../../utils/crypto';
 import { EmailService } from '../../services/EmailService';
 import { InvitationWorkflowService } from '../../services/ObservationService';
+import { NotificationService } from '../../services/NotificationService';
 import { User } from '../users/user.model';
 import { Child } from '../children/child.model';
 import { CareCircleMembership } from './care-circle-membership.model';
@@ -71,6 +72,16 @@ careCircleRouter.post(
     void EmailService.careCircleInvite(email, token, child.fullName, req.body.role, req.body.message).catch((error) => {
       console.error('Failed to send care circle invitation email', error);
     });
+    void NotificationService.createChildInvitationNotifications({
+      childId: req.params.childId,
+      invitationId: invitation._id.toString(),
+      actorId: req.user!._id.toString(),
+      actorName: req.user!.fullName,
+      childName: child.fullName,
+      invitedEmail: email,
+      invitationType: 'care_circle',
+      role: req.body.role
+    }).catch((error) => console.error('Failed to create care circle invitation notifications', error));
     ok(res, 'Care circle invitation queued', { invitationId: invitation._id, emailStatus: 'queued' }, 201);
   })
 );

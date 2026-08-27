@@ -33,7 +33,7 @@ const listAccessibleObservations = (message: string) => asyncHandler(async (req,
   }
   const total = await Observation.countDocuments(filter);
   const items = await Observation.find(filter)
-    .populate('childId daycareId domainId indicatorId', 'fullName nickname profilePhoto name title')
+    .populate('childId daycareId domainId indicatorId', 'fullName nickname profilePhoto name slug title')
     .populate('authorId', 'fullName profilePhoto caregiverRole daycareRole userType')
     .sort({ createdAt: -1 })
     .skip(skip)

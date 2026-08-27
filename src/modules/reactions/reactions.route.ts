@@ -13,7 +13,7 @@ reactionsRouter.use(requireAuth);
 
 const observationCard = async (observationId: unknown) => {
   const observation = await Observation.findById(observationId)
-    .populate('childId domainId indicatorId', 'fullName nickname profilePhoto name title')
+    .populate('childId domainId indicatorId', 'fullName nickname profilePhoto name slug title')
     .populate('authorId', 'fullName profilePhoto caregiverRole daycareRole userType');
   if (!observation) return null;
   const counts = await SocialResponseService.observationCountMaps([observation._id]);

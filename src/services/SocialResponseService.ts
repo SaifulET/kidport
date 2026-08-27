@@ -77,6 +77,24 @@ const observationProcessingStatus = (value: unknown) => {
   };
 };
 
+const domainPayload = (value: unknown) => {
+  if (!value) return { domain: null, domainId: null, domainName: null };
+  if (typeof value === 'string' || value instanceof Types.ObjectId) {
+    const id = value.toString();
+    return { domain: { id, name: null, slug: null }, domainId: id, domainName: null };
+  }
+  if (typeof value !== 'object') return { domain: null, domainId: null, domainName: null };
+
+  const data = value as { _id?: unknown; id?: unknown; name?: string; slug?: string };
+  const id = data._id?.toString?.() ?? data.id?.toString?.() ?? null;
+  const name = data.name ?? null;
+  return {
+    domain: id || name ? { id, name, slug: data.slug ?? null } : null,
+    domainId: id,
+    domainName: name
+  };
+};
+
 export class SocialResponseService {
   static author(user: unknown) {
     if (!user || typeof user !== 'object' || !('fullName' in user)) return null;
@@ -114,6 +132,7 @@ export class SocialResponseService {
       : (observation as Record<string, unknown>);
     const id = String(data._id);
     const domain = data.domainId as { name?: string } | undefined;
+    const domainData = domainPayload(data.domainId);
     const indicator = data.indicatorId as { title?: string } | undefined;
     const isMilestone = Boolean(data.isMilestone);
     return {
@@ -125,6 +144,9 @@ export class SocialResponseService {
       description: data.description ?? null,
       progress: data.progress ?? null,
       icon: data.icon ?? null,
+      domain: domainData.domain,
+      domainId: domainData.domainId,
+      domainName: domainData.domainName,
       status: data.status ?? null,
       aiProcessing: observationProcessingStatus(data.aiMetadata),
       milestone: isMilestone

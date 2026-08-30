@@ -28,6 +28,7 @@ export type CreateObservationInput = {
   mood?: string;
   occurredAt?: Date;
   files?: Express.Multer.File[];
+  storedMedia?: StoredMedia[];
   status?: 'active' | 'draft';
 };
 
@@ -199,6 +200,9 @@ export class ObservationService {
               ? 'images'
               : 'files';
       media = await Promise.all(input.files.map((file) => StorageService.uploadBuffer(`children/${input.childId}/observations/${folder}`, file)));
+    }
+    if (input.storedMedia?.length) {
+      media = media.concat(input.storedMedia.map((item) => ({ ...item, url: item.url ?? StorageService.publicUrl(item.key) })));
     }
 
     const providedText = input.text?.trim();

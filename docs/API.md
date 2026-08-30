@@ -2418,6 +2418,49 @@ Backend score mapping:
 
 The frontend must not send `stageScore`. The backend determines it. If `stage` is `confident`, `isMilestone` is set to `true`.
 
+### POST `/children/:childId/observations/media-upload-url`
+
+Auth: required, child access required.
+
+Use this for video or other media that may exceed the deployment request-body limit. The API returns a signed S3 `PUT` URL. Upload the file bytes directly to that URL with the returned `Content-Type` header, then send the returned `media` object in `POST /children/:childId/observations`.
+
+Browser clients need the S3 bucket CORS policy to allow `PUT` from the frontend origin and the `Content-Type` header.
+
+Request:
+
+```json
+{
+  "fileName": "observation-video.mp4",
+  "contentType": "video/mp4",
+  "size": 8388608,
+  "type": "video"
+}
+```
+
+Response:
+
+```json
+{
+  "success": true,
+  "message": "Observation media upload URL created",
+  "data": {
+    "method": "PUT",
+    "url": "https://...",
+    "headers": {
+      "Content-Type": "video/mp4"
+    },
+    "expiresInSeconds": 600,
+    "media": {
+      "key": "children/66f.../observations/videos/...",
+      "url": "https://kidport.s3.eu-north-1.amazonaws.com/children/66f.../observations/videos/...",
+      "mimeType": "video/mp4",
+      "size": 8388608,
+      "originalName": "observation-video.mp4"
+    }
+  }
+}
+```
+
 ### POST `/children/:childId/observations`
 
 Auth: required, child access required. Child owners, active care-circle caregivers, and active daycare members for a daycare-associated child can create observations.
@@ -2453,6 +2496,25 @@ media: one or more image, audio, or video files
 ```
 
 `observation` can also be used as the file field name for media uploads.
+
+JSON media field for direct S3 uploads:
+
+```json
+{
+  "observation": "Ava described what she was building.",
+  "keyword": "steady",
+  "domain": "Language & Literacy",
+  "type": "video",
+  "media": [
+    {
+      "key": "children/66f.../observations/videos/...",
+      "mimeType": "video/mp4",
+      "size": 8388608,
+      "originalName": "observation-video.mp4"
+    }
+  ]
+}
+```
 
 When `type` is omitted, the backend infers it from `media`; if no media is uploaded, it uses `text`.
 

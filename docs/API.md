@@ -396,7 +396,9 @@ Response:
 {
   "success": true,
   "message": "OTP verified",
-  "data": null
+  "data": {
+    "resetToken": "opaque-reset-token"
+  }
 }
 ```
 
@@ -404,13 +406,18 @@ Response:
 
 Auth: none
 
+Headers:
+
+```http
+x-password-reset-token: opaque-reset-token
+```
+
 Request body:
 
 ```json
 {
-  "email": "jane@example.com",
-  "otp": "1234",
-  "password": "newStrongPassword123"
+  "newPassword": "newStrongPassword123",
+  "confirmPassword": "newStrongPassword123"
 }
 ```
 

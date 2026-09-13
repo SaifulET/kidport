@@ -1,9 +1,22 @@
+import dns from 'node:dns';
 import mongoose from 'mongoose';
 import type { MongoMemoryServer } from 'mongodb-memory-server';
 import { env } from './env';
 
 let memoryServer: MongoMemoryServer | undefined;
 let connectionPromise: Promise<void> | undefined;
+
+const configureMongoDns = () => {
+  if (!env.MONGODB_URI.startsWith('mongodb+srv://') || !env.MONGODB_DNS_SERVERS) return;
+
+  const servers = env.MONGODB_DNS_SERVERS.split(',')
+    .map((server) => server.trim())
+    .filter(Boolean);
+
+  if (servers.length > 0) {
+    dns.setServers(servers);
+  }
+};
 
 export const connectDatabase = async () => {
   mongoose.set('strictQuery', true);
@@ -28,11 +41,12 @@ export const connectDatabase = async () => {
     }
 
     try {
+      configureMongoDns();
       await mongoose.connect(env.MONGODB_URI);
     } catch (error) {
       throw new Error(
-        `Could not connect to MongoDB at ${env.MONGODB_URI}. ` +
-          'Start MongoDB locally, update MONGODB_URI, or run `npm run dev` for an in-memory dev database.',
+        'Could not connect to MongoDB. ' +
+          'Start MongoDB locally, update MONGODB_URI, or run `npm run dev:memory` for an in-memory dev database.',
         { cause: error }
       );
     }

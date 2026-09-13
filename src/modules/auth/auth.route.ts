@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import type { Request } from 'express';
 import bcrypt from 'bcryptjs';
 import { z } from 'zod';
 import { User } from '../users/user.model';
@@ -8,7 +9,7 @@ import { AppError } from '../../utils/AppError';
 import { asyncHandler } from '../../utils/asyncHandler';
 import { ok, paginated } from '../../utils/apiResponse';
 import { paginationFromQuery, paginationQuerySchema } from '../../utils/pagination';
-import { randomOtp, hashToken } from '../../utils/crypto';
+import { randomOtp, randomToken, hashToken } from '../../utils/crypto';
 import { requireAuth } from '../../middlewares/auth';
 import { requirePlatformAdmin } from '../../middlewares/authorization';
 import { validate } from '../../middlewares/validate';
@@ -25,7 +26,7 @@ const identityToAccount = (identity: string) =>
     ? { userType: 'daycare' as const, daycareRole: 'daycare_admin' as const, status: 'pending' as const }
     : { userType: 'caregiver' as const, caregiverRole: identity as 'mother' | 'father' | 'parent' | 'nanny' };
 
-const publicUserFields = '-passwordHash -passwordResetTokenHash -passwordResetExpiresAt';
+const publicUserFields = '-passwordHash -passwordResetTokenHash -passwordResetExpiresAt -passwordResetSessionHash -passwordResetSessionExpiresAt';
 
 const passwordResetOtpSchema = z.object({
   body: z.object({
@@ -33,6 +34,24 @@ const passwordResetOtpSchema = z.object({
     otp: z.string().regex(/^\d{4}$/, 'OTP must be 4 digits')
   })
 });
+
+const resetPasswordSchema = z.object({
+  body: z
+    .object({
+      newPassword: z.string().min(8),
+      confirmPassword: z.string().min(8)
+    })
+    .refine((body) => body.newPassword === body.confirmPassword, {
+      message: 'Passwords do not match',
+      path: ['confirmPassword']
+    })
+});
+
+const resetTokenFromRequest = (req: Request) => {
+  const token = req.get('x-password-reset-token');
+  if (!token) throw new AppError('Password reset token is required', 400);
+  return token;
+};
 
 authRouter.post(
   '/register',
@@ -197,24 +216,29 @@ authRouter.post(
       passwordResetExpiresAt: { $gt: new Date() }
     });
     if (!user) throw new AppError('Invalid or expired OTP', 400);
-    ok(res, 'OTP verified');
+    const resetToken = randomToken();
+    user.passwordResetSessionHash = hashToken(resetToken);
+    user.passwordResetSessionExpiresAt = new Date(Date.now() + 10 * 60 * 1000);
+    await user.save();
+    ok(res, 'OTP verified', { resetToken });
   })
 );
 
 authRouter.post(
   '/reset-password',
-  validate(passwordResetOtpSchema.extend({ body: passwordResetOtpSchema.shape.body.extend({ password: z.string().min(8) }) })),
+  validate(resetPasswordSchema),
   asyncHandler(async (req, res) => {
-    const email = req.body.email.toLowerCase().trim();
+    const resetToken = resetTokenFromRequest(req);
     const user = await User.findOne({
-      email,
-      passwordResetTokenHash: hashToken(req.body.otp),
-      passwordResetExpiresAt: { $gt: new Date() }
+      passwordResetSessionHash: hashToken(resetToken),
+      passwordResetSessionExpiresAt: { $gt: new Date() }
     });
-    if (!user) throw new AppError('Invalid or expired OTP', 400);
-    user.passwordHash = await bcrypt.hash(req.body.password, 12);
+    if (!user) throw new AppError('Invalid or expired password reset token', 400);
+    user.passwordHash = await bcrypt.hash(req.body.newPassword, 12);
     user.passwordResetTokenHash = undefined;
     user.passwordResetExpiresAt = undefined;
+    user.passwordResetSessionHash = undefined;
+    user.passwordResetSessionExpiresAt = undefined;
     await user.save();
     ok(res, 'Password reset successful');
   })

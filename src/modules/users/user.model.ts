@@ -25,6 +25,8 @@ const userSchema = new Schema(
     status: { type: String, enum: ['pending', 'active', 'disabled', 'rejected', 'deleted'], default: 'active', index: true },
     passwordResetTokenHash: String,
     passwordResetExpiresAt: Date,
+    passwordResetSessionHash: String,
+    passwordResetSessionExpiresAt: Date,
     emailVerifiedAt: Date,
     activeChildId: { type: Schema.Types.ObjectId, ref: 'Child' },
     deletedAt: Date
@@ -38,6 +40,8 @@ const transformProfilePhoto = (_doc: unknown, ret: Record<string, unknown>) => {
   delete ret.passwordHash;
   delete ret.passwordResetTokenHash;
   delete ret.passwordResetExpiresAt;
+  delete ret.passwordResetSessionHash;
+  delete ret.passwordResetSessionExpiresAt;
   return ret;
 };
 

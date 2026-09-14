@@ -7,6 +7,7 @@ import { paginationFromQuery } from '../../utils/pagination';
 import { AppError } from '../../utils/AppError';
 import { StorageService } from '../../services/StorageService';
 import { NotificationService } from '../../services/NotificationService';
+import { emitSupportMessage, emitSupportTicket } from '../../socket';
 import { SupportIssue } from './support-issue.model';
 import { FeatureRequest } from './feature-request.model';
 import { SupportMessage } from './support-message.model';
@@ -79,6 +80,8 @@ supportRouter.post('/support/messages', asyncHandler(async (req, res) => {
     text: 'Thanks for reaching out! Let me help you with that. Could you provide more details?',
     status: 'sent'
   });
+  emitSupportMessage(sentMessage);
+  emitSupportMessage(autoReply);
 
   ok(res, 'Support message sent', {
     thread: supportThread(userId.toString()),
@@ -91,6 +94,7 @@ supportRouter.post('/support/issues', upload.array('attachments', 5), asyncHandl
   const files = (req.files as Express.Multer.File[]) ?? [];
   const attachments = await Promise.all(files.map((file) => StorageService.uploadBuffer(`support/${req.user!._id}`, file)));
   const issue = await SupportIssue.create({ ...req.body, userId: req.user!._id, attachments });
+  emitSupportTicket(issue, req.user!);
   void NotificationService.createForAdmins('support_issue_created', 'New support ticket', `${req.user!.fullName} opened a support ticket: ${issue.title}.`, {
     ticketId: issue._id.toString(),
     userId: req.user!._id.toString(),

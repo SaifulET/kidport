@@ -21,6 +21,7 @@ import { Subscription } from '../subscriptions/subscription.model';
 import { User } from '../users/user.model';
 import { DevelopmentDomain } from '../domains/development-domain.model';
 import { NotificationService } from '../../services/NotificationService';
+import { emitSupportMessage, emitSupportTicket, emitSupportTicketDeleted } from '../../socket';
 
 export const adminRouter = Router();
 
@@ -727,6 +728,7 @@ adminRouter.post(
   asyncHandler(async (req, res) => {
     const userId = objectIdOrThrow(req.params.userId, 'User id');
     const message = await SupportMessage.create({ userId, sender: 'support', text: req.body.text, status: 'sent' });
+    emitSupportMessage(message);
     ok(res, 'Support reply sent', {
       id: message._id.toString(),
       sender: 'agent',
@@ -743,6 +745,8 @@ adminRouter.patch(
   asyncHandler(async (req, res) => {
     const issue = await SupportIssue.findByIdAndUpdate(objectIdOrThrow(req.params.ticketId, 'Ticket id'), { $set: { status: req.body.status } }, { new: true });
     if (!issue) throw new AppError('Support ticket not found', 404);
+    const user = await User.findById(issue.userId);
+    if (user) emitSupportTicket(issue, user);
     ok(res, 'Support ticket status updated', issue);
   })
 );
@@ -750,6 +754,7 @@ adminRouter.patch(
 adminRouter.delete('/support/tickets/:ticketId', asyncHandler(async (req, res) => {
   const issue = await SupportIssue.findByIdAndDelete(objectIdOrThrow(req.params.ticketId, 'Ticket id'));
   if (!issue) throw new AppError('Support ticket not found', 404);
+  emitSupportTicketDeleted(issue._id.toString());
   ok(res, 'Support ticket deleted', issue);
 }));
 

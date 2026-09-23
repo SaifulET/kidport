@@ -11,42 +11,103 @@ import { env } from './config/env';
 import { v1Router } from './routes/v1';
 import { errorHandler, notFound } from './middlewares/errorHandler';
 
+type ObservationTraceEvent = { label: string; ms: number; detail?: Record<string, unknown> };
+
+const observationTraceNow = () => process.hrtime.bigint();
+
+const observationTraceMs = (startedAt: bigint) => Number(process.hrtime.bigint() - startedAt) / 1_000_000;
+
+const observationTraceMark = (req: Request, label: string, detail?: Record<string, unknown>) => {
+  const trace = (req as Request & { observationTrace?: { startedAt: bigint; events: ObservationTraceEvent[] } }).observationTrace;
+  if (!trace) return;
+  trace.events.push({ label, ms: observationTraceMs(trace.startedAt), detail });
+};
+
+const observationLifecycleTrace = (req: Request, res: Response, next: NextFunction) => {
+  if (req.method !== 'GET' || req.path !== '/api/v1/admin/observations') {
+    next();
+    return;
+  }
+
+  const startedAt = observationTraceNow();
+  (req as Request & { observationTrace?: { startedAt: bigint; events: ObservationTraceEvent[] } }).observationTrace = {
+    startedAt,
+    events: [{ label: 'T1 backend request received', ms: 0 }]
+  };
+
+  const originalJson = res.json.bind(res);
+  res.json = ((body?: unknown) => {
+    observationTraceMark(req, 'response.json entered', {
+      bodyType: typeof body,
+      rows: Array.isArray((body as { data?: unknown })?.data) ? ((body as { data: unknown[] }).data.length) : undefined
+    });
+    const jsonStartedAt = observationTraceNow();
+    const result = originalJson(body);
+    observationTraceMark(req, 'response.json returned', {
+      durationMs: Number(process.hrtime.bigint() - jsonStartedAt) / 1_000_000,
+      statusCode: res.statusCode
+    });
+    return result;
+  }) as typeof res.json;
+
+  const originalSend = res.send.bind(res);
+  res.send = ((body?: unknown) => {
+    observationTraceMark(req, 'response.send entered', {
+      bodyType: typeof body,
+      bodyBytes:
+        typeof body === 'string'
+          ? Buffer.byteLength(body)
+          : Buffer.isBuffer(body)
+            ? body.length
+            : undefined
+    });
+    const sendStartedAt = observationTraceNow();
+    const result = originalSend(body);
+    observationTraceMark(req, 'response.send returned', {
+      durationMs: Number(process.hrtime.bigint() - sendStartedAt) / 1_000_000,
+      statusCode: res.statusCode
+    });
+    return result;
+  }) as typeof res.send;
+
+  res.once('finish', () => {
+    observationTraceMark(req, 'T7 response finish', {
+      statusCode: res.statusCode,
+      contentLength: res.getHeader('content-length'),
+      contentEncoding: res.getHeader('content-encoding'),
+      etag: res.getHeader('etag'),
+      cacheControl: res.getHeader('cache-control')
+    });
+  });
+
+  res.once('close', () => {
+    observationTraceMark(req, 'T8 response close', {
+      statusCode: res.statusCode,
+      writableEnded: res.writableEnded,
+      destroyed: res.destroyed
+    });
+    const trace = (req as Request & { observationTrace?: { events: ObservationTraceEvent[] } }).observationTrace;
+    if (trace) {
+      console.log('[ObservationLifecycle]', JSON.stringify(trace.events));
+    }
+  });
+
+  next();
+};
+
 const ensureDatabase = async (_req: Request, _res: Response, next: NextFunction) => {
   try {
+    observationTraceMark(_req, 'api/v1 ensureDatabase started');
     await connectDatabase();
+    observationTraceMark(_req, 'api/v1 ensureDatabase completed');
     next();
   } catch (error) {
     next(error);
   }
 };
 
-const requestTrace = (req: Request, res: Response, next: NextFunction) => {
-  const requestId =
-    req.get('x-request-id') ||
-    `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-  const receivedAt = Date.now();
-  const receivedAtIso = new Date(receivedAt).toISOString();
-  const clientSentAt = req.get('x-client-sent-at') || null;
-
-  res.setHeader('x-request-id', requestId);
-  res.setHeader('x-backend-received-at', receivedAtIso);
-
-  
-  res.on('finish', () => {
-    const respondedAt = Date.now();
-    const respondedAtIso = new Date(respondedAt).toISOString();
-      });
-
-  const originalEnd = res.end.bind(res) as (...args: any[]) => Response;
-  res.end = ((...args: any[]) => {
-    if (!res.headersSent) {
-      const respondedAt = Date.now();
-      res.setHeader('x-backend-responded-at', new Date(respondedAt).toISOString());
-      res.setHeader('x-backend-duration-ms', String(respondedAt - receivedAt));
-    }
-    return originalEnd(...args);
-  }) as typeof res.end;
-
+const disableApiCaching = (_req: Request, res: Response, next: NextFunction) => {
+  res.setHeader('Cache-Control', 'no-store');
   next();
 };
 
@@ -59,7 +120,11 @@ export const createApp = () => {
   app.use(express.json({ limit: '2mb' }));
   app.use(express.urlencoded({ extended: true }));
   app.use(mongoSanitize());
-  app.use(requestTrace);
+  app.use(observationLifecycleTrace);
+  app.use((req, _res, next) => {
+    observationTraceMark(req, 'global middleware before rateLimit');
+    next();
+  });
   app.use(
     rateLimit({
       windowMs: 15 * 60 * 1000,
@@ -68,11 +133,19 @@ export const createApp = () => {
       legacyHeaders: false
     })
   );
+  app.use((req, _res, next) => {
+    observationTraceMark(req, 'global middleware after rateLimit');
+    next();
+  });
   if (env.NODE_ENV !== 'test') app.use(morgan('combined'));
+  app.use((req, _res, next) => {
+    observationTraceMark(req, 'global middleware after morgan');
+    next();
+  });
 
   app.get('/', (_req, res) => res.redirect(302, '/api/v1/health'));
   app.get(['/favicon.ico', '/favicon.png'], (_req, res) => res.status(204).end());
-  app.use('/api/v1', ensureDatabase, v1Router);
+  app.use('/api/v1', disableApiCaching, ensureDatabase, v1Router);
   app.use(notFound);
   app.use(errorHandler);
 

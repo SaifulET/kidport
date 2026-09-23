@@ -25,6 +25,7 @@ import { AccountDeletionService } from '../services/AccountDeletionService';
 export const v1Router = Router();
 
 v1Router.get('/health', (_req, res) => ok(res, 'API healthy', { version: 'v1' }));
+v1Router.use('/admin', adminRouter);
 v1Router.use('/auth', authRouter);
 v1Router.use('/legal', legalRouter);
 v1Router.use('/profile', profileRouter);
@@ -42,7 +43,6 @@ v1Router.use(notificationsRouter);
 v1Router.use(reportsRouter);
 v1Router.use(aiRouter);
 v1Router.use(supportRouter);
-v1Router.use('/admin', adminRouter);
 
 v1Router.delete('/account', requireAuth, async (req, res) => {
   const deletion = await AccountDeletionService.deleteUserAccount(req.user!);

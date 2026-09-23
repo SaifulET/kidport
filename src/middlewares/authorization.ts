@@ -2,6 +2,16 @@ import type { NextFunction, Request, Response } from 'express';
 import { AuthorizationService } from '../services/AuthorizationService';
 import { AppError } from '../utils/AppError';
 
+const markObservationTrace = (req: Request, label: string, detail?: Record<string, unknown>) => {
+  const trace = (req as any).observationTrace;
+  if (!trace) return;
+  trace.events.push({
+    label,
+    ms: Number(process.hrtime.bigint() - trace.startedAt) / 1_000_000,
+    detail
+  });
+};
+
 export const requireChildAccess = (paramName = 'childId') => async (req: Request, _res: Response, next: NextFunction) => {
   if (!req.user) return next(new AppError('Authentication required', 401));
   const childId = req.params[paramName];
@@ -43,7 +53,9 @@ export const requireActiveAccount = async (req: Request, _res: Response, next: N
 };
 
 export const requirePlatformAdmin = async (req: Request, _res: Response, next: NextFunction) => {
+  markObservationTrace(req, 'requirePlatformAdmin started');
   if (!req.user) return next(new AppError('Authentication required', 401));
   if (req.user.userType !== 'admin' || req.user.status !== 'active') return next(new AppError('Platform administrator permission required', 403));
+  markObservationTrace(req, 'requirePlatformAdmin completed');
   next();
 };

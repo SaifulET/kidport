@@ -26,6 +26,16 @@ import { emitSupportMessage, emitSupportTicket, emitSupportTicketDeleted } from 
 export const adminRouter = Router();
 
 adminRouter.use(requireAuth, requirePlatformAdmin);
+adminRouter.use((req, _res, next) => {
+  const trace = (req as any).observationTrace;
+  if (req.method === 'GET' && req.path === '/observations' && trace) {
+    trace.events.push({
+      label: 'T2 auth middleware completed',
+      ms: Number(process.hrtime.bigint() - trace.startedAt) / 1_000_000
+    });
+  }
+  next();
+});
 
 const publicUserFields = '-passwordHash -passwordResetTokenHash -passwordResetExpiresAt';
 
@@ -141,6 +151,20 @@ let dashboardCache: { expiresAt: number; data: unknown } | null = null;
 let observationStatsCache:
   | { expiresAt: number; data: { total: number; today: number; byDaycare: number; byParent: number } }
   | null = null;
+
+type AdminObservationRow = {
+  _id: Types.ObjectId;
+  type: string;
+  title?: string;
+  text?: string;
+  description?: string;
+  childId?: { _id: Types.ObjectId; fullName?: string };
+  authorId?: { _id: Types.ObjectId; fullName?: string };
+  occurredAt?: Date;
+  domainId?: { _id: Types.ObjectId; name?: string; slug?: string };
+  stage?: string;
+  aiMetadata?: unknown;
+};
 
 const dashboardWindow = () =>
   Array.from({ length: 7 }, (_, index) => {
@@ -506,6 +530,13 @@ adminRouter.post(
 );
 
 adminRouter.get('/observations', asyncHandler(async (req, res) => {
+  const trace = (req as any).observationTrace;
+  if (trace) {
+    trace.events.push({
+      label: 'T3 controller started',
+      ms: Number(process.hrtime.bigint() - trace.startedAt) / 1_000_000
+    });
+  }
   const startedAt = Date.now();
   const { page, limit, skip } = paginationFromQuery(req.query);
   const type = typeof req.query.type === 'string' ? req.query.type : undefined;
@@ -541,12 +572,61 @@ adminRouter.get('/observations', asyncHandler(async (req, res) => {
           return data;
         });
 
-  const observationsQuery = Observation.find(filter)
-    .select('type title text description childId authorId occurredAt domainId stage aiMetadata')
-    .sort({ occurredAt: -1 })
-    .skip(skip)
-    .limit(limit)
-    .lean();
+  const observationsQuery = Observation.aggregate<AdminObservationRow>([
+    { $match: filter },
+    { $sort: { occurredAt: -1 } },
+    { $skip: skip },
+    { $limit: limit },
+    {
+      $project: {
+        type: 1,
+        title: 1,
+        text: 1,
+        description: 1,
+        childId: 1,
+        authorId: 1,
+        occurredAt: 1,
+        domainId: 1,
+        stage: 1,
+        aiMetadata: 1
+      }
+    },
+    {
+      $lookup: {
+        from: 'children',
+        localField: 'childId',
+        foreignField: '_id',
+        pipeline: [{ $project: { fullName: 1 } }],
+        as: 'child'
+      }
+    },
+    {
+      $lookup: {
+        from: 'users',
+        localField: 'authorId',
+        foreignField: '_id',
+        pipeline: [{ $project: { fullName: 1 } }],
+        as: 'author'
+      }
+    },
+    {
+      $lookup: {
+        from: 'developmentdomains',
+        localField: 'domainId',
+        foreignField: '_id',
+        pipeline: [{ $project: { name: 1, slug: 1 } }],
+        as: 'domain'
+      }
+    },
+    {
+      $set: {
+        childId: { $first: '$child' },
+        authorId: { $first: '$author' },
+        domainId: { $first: '$domain' }
+      }
+    },
+    { $project: { child: 0, author: 0, domain: 0 } }
+  ]);
 
   if (!search) {
     observationsQuery.hint(
@@ -556,29 +636,11 @@ adminRouter.get('/observations', asyncHandler(async (req, res) => {
     );
   }
 
-  const [stats, rawObservations] = await Promise.all([
+  const [stats, observations] = await Promise.all([
     statsPromise,
     timed('findObservations', observationsQuery)
   ]);
-  const relationStartedAt = Date.now();
-  const childIds = [...new Set(rawObservations.map((observation: any) => observation.childId?.toString()).filter(Boolean))];
-  const authorIds = [...new Set(rawObservations.map((observation: any) => observation.authorId?.toString()).filter(Boolean))];
-  const domainIds = [...new Set(rawObservations.map((observation: any) => observation.domainId?.toString()).filter(Boolean))];
-  const [children, authors, domains] = await Promise.all([
-    timed('lookupChildren', Child.find({ _id: { $in: childIds } }).select('fullName').lean()),
-    timed('lookupAuthors', User.find({ _id: { $in: authorIds } }).select('fullName').lean()),
-    timed('lookupDomains', DevelopmentDomain.find({ _id: { $in: domainIds } }).select('name slug').lean())
-  ]);
-  timings.lookupRelations = Date.now() - relationStartedAt;
-  const childById = new Map(children.map((child: any) => [child._id.toString(), child]));
-  const authorById = new Map(authors.map((author: any) => [author._id.toString(), author]));
-  const domainById = new Map(domains.map((domain: any) => [domain._id.toString(), domain]));
-  const observations = rawObservations.map((observation: any) => ({
-    ...observation,
-    childId: childById.get(observation.childId?.toString()),
-    authorId: authorById.get(observation.authorId?.toString()),
-    domainId: domainById.get(observation.domainId?.toString())
-  }));
+  timings.lookupRelations = 0;
   const total = hasListFilter
     ? await timed('totalCount', Observation.countDocuments(filter))
     : (() => {
@@ -586,7 +648,7 @@ adminRouter.get('/observations', asyncHandler(async (req, res) => {
         return stats.total;
       })();
   const queriedAt = Date.now();
-  const payload = observations.map((observation: any) => ({
+  const payload = observations.map((observation) => ({
     id: observation._id.toString(),
     type: observation.type,
     title: observation.title || observation.text || 'Untitled observation',
@@ -607,14 +669,52 @@ adminRouter.get('/observations', asyncHandler(async (req, res) => {
     status: observation.aiMetadata ? ['Processed'] : ['Pending']
   }));
   const mappedAt = Date.now();
+  if (trace) {
+    trace.events.push({
+      label: 'T4 controller/database work completed',
+      ms: Number(process.hrtime.bigint() - trace.startedAt) / 1_000_000,
+      detail: {
+        controllerMs: mappedAt - startedAt,
+        findObservationsMs: timings.findObservations ?? 0,
+        lookupRelationsMs: timings.lookupRelations ?? 0,
+        statsMs: timings.stats ?? 0,
+        count: observations.length
+      }
+    });
+  }
   
-  res.json({
+  const responseBody = {
     success: true,
     message: 'Admin observations',
     data: payload,
     stats: { total, today: stats.today, byDaycare: stats.byDaycare, byParent: stats.byParent },
     pagination: { page, limit, total, totalPages: Math.ceil(total / limit) }
+  };
+  if (trace) {
+    const stringifyStartedAt = process.hrtime.bigint();
+    const responseBytes = Buffer.byteLength(JSON.stringify(responseBody));
+    trace.events.push({
+      label: 'response JSON.stringify probe completed',
+      ms: Number(process.hrtime.bigint() - trace.startedAt) / 1_000_000,
+      detail: {
+        durationMs: Number(process.hrtime.bigint() - stringifyStartedAt) / 1_000_000,
+        responseBytes
+      }
+    });
+    trace.events.push({
+      label: 'T5 immediately before res.json',
+      ms: Number(process.hrtime.bigint() - trace.startedAt) / 1_000_000
+    });
+  }
+  res.json({
+    ...responseBody
   });
+  if (trace) {
+    trace.events.push({
+      label: 'T6 immediately after res.json',
+      ms: Number(process.hrtime.bigint() - trace.startedAt) / 1_000_000
+    });
+  }
 }));
 
 adminRouter.delete('/observations/:observationId', asyncHandler(async (req, res) => {

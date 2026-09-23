@@ -6,6 +6,20 @@ import { env } from './env';
 let memoryServer: MongoMemoryServer | undefined;
 let connectionPromise: Promise<void> | undefined;
 
+const ensurePerformanceIndexes = async () => {
+  if (env.NODE_ENV === 'production') return;
+
+  const db = mongoose.connection.db;
+  if (!db) return;
+
+  try {
+    await Promise.all([
+      db.collection('observations').createIndex({ status: 1, occurredAt: -1 }, { name: 'status_1_occurredAt_-1' }),
+      db.collection('observations').createIndex({ status: 1, type: 1, occurredAt: -1 }, { name: 'status_1_type_1_occurredAt_-1' })
+    ]);
+  } catch (_error) {}
+};
+
 const configureMongoDns = () => {
   if (!env.MONGODB_URI.startsWith('mongodb+srv://') || !env.MONGODB_DNS_SERVERS) return;
 
@@ -36,13 +50,14 @@ export const connectDatabase = async () => {
       });
       const uri = memoryServer.getUri();
       await mongoose.connect(uri);
-      console.log(`Connected to in-memory MongoDB at ${uri}`);
-      return;
+      await ensurePerformanceIndexes();
+            return;
     }
 
     try {
       configureMongoDns();
       await mongoose.connect(env.MONGODB_URI);
+      await ensurePerformanceIndexes();
     } catch (error) {
       throw new Error(
         'Could not connect to MongoDB. ' +

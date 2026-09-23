@@ -217,9 +217,7 @@ careCircleRouter.post(
       message: req.body.message,
       expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
     });
-    void EmailService.careCircleInvite(email, token, child.fullName, req.body.role, req.body.message).catch((error) => {
-      console.error('Failed to send care circle invitation email', error);
-    });
+    void EmailService.careCircleInvite(email, token, child.fullName, req.body.role, req.body.message).catch(() => {});
     void NotificationService.createChildInvitationNotifications({
       childId: req.params.childId,
       invitationId: invitation._id.toString(),
@@ -229,7 +227,7 @@ careCircleRouter.post(
       invitedEmail: email,
       invitationType: 'care_circle',
       role: req.body.role
-    }).catch((error) => console.error('Failed to create care circle invitation notifications', error));
+    }).catch(() => {});
     ok(res, 'Care circle invitation queued', { invitationId: invitation._id, emailStatus: 'queued' }, 201);
   })
 );
@@ -251,3 +249,4 @@ const acceptCareCircleInvitation = asyncHandler(async (req, res) => {
 
 careCircleRouter.get('/care-circle/invitations/:token/accept', requireAuth, acceptCareCircleInvitation);
 careCircleRouter.post('/care-circle/invitations/:token/accept', requireAuth, acceptCareCircleInvitation);
+

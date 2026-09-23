@@ -17,5 +17,8 @@ const supportIssueSchema = new Schema(
   { timestamps: true }
 );
 
+supportIssueSchema.index({ status: 1, updatedAt: -1 });
+supportIssueSchema.index({ updatedAt: -1 });
+
 export type SupportIssueAttrs = InferSchemaType<typeof supportIssueSchema>;
 export const SupportIssue = model('SupportIssue', supportIssueSchema);

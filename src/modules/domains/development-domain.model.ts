@@ -11,5 +11,7 @@ const developmentDomainSchema = new Schema(
   { timestamps: true }
 );
 
+developmentDomainSchema.index({ status: 1, sortOrder: 1, name: 1 });
+
 export type DevelopmentDomainAttrs = InferSchemaType<typeof developmentDomainSchema>;
 export const DevelopmentDomain = model('DevelopmentDomain', developmentDomainSchema);

@@ -35,9 +35,7 @@ domainsRouter.post(
   asyncHandler(async (req, res) => {
     const name = req.body.name.trim();
     const domain = await DevelopmentDomain.create({ name, slug: slugify(name) });
-    void NotificationService.createDomainCreatedNotifications(domain._id.toString(), domain.name, req.user!._id.toString()).catch((error) => {
-      console.error('Failed to create domain notifications', error);
-    });
+    void NotificationService.createDomainCreatedNotifications(domain._id.toString(), domain.name, req.user!._id.toString()).catch(() => {});
     ok(res, 'Domain created', domain, 201);
   })
 );

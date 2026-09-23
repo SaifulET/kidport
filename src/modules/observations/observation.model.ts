@@ -45,6 +45,11 @@ observationSchema.index({ childId: 1, domainId: 1, createdAt: -1 });
 observationSchema.index({ authorId: 1, createdAt: -1 });
 observationSchema.index({ isMilestone: 1, childId: 1 });
 observationSchema.index({ classroomId: 1, createdAt: -1 });
+observationSchema.index({ status: 1, occurredAt: -1 });
+observationSchema.index({ status: 1, type: 1, occurredAt: -1 });
+observationSchema.index({ status: 1, aiMetadata: 1 });
+observationSchema.index({ status: 1, domainId: 1 });
+observationSchema.index({ status: 1, daycareId: 1 });
 
 const transformObservation = (_doc: unknown, ret: Record<string, unknown>) => {
   const media = ret.media as Array<{ url?: string } | string> | undefined;

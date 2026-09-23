@@ -13,11 +13,13 @@ import { randomOtp, randomToken, hashToken } from '../../utils/crypto';
 import { requireAuth } from '../../middlewares/auth';
 import { requirePlatformAdmin } from '../../middlewares/authorization';
 import { validate } from '../../middlewares/validate';
+import { env } from '../../config/env';
 import { registerSchema, loginSchema, refreshSchema } from './auth.validation';
 import { EmailService } from '../../services/EmailService';
 import { DaycareAccountService } from '../../services/DaycareAccountService';
 import { NotificationService } from '../../services/NotificationService';
 import { InvitationWorkflowService } from '../../services/ObservationService';
+import { AccountDeletionService } from '../../services/AccountDeletionService';
 
 export const authRouter = Router();
 
@@ -47,8 +49,26 @@ const resetPasswordSchema = z.object({
     })
 });
 
+const cookieValue = (req: Request, name: string) => {
+  const cookieHeader = req.get('cookie');
+  if (!cookieHeader) return undefined;
+
+  return cookieHeader
+    .split(';')
+    .map((part) => part.trim())
+    .map((part) => {
+      const separatorIndex = part.indexOf('=');
+      if (separatorIndex === -1) return null;
+      return {
+        key: part.slice(0, separatorIndex),
+        value: decodeURIComponent(part.slice(separatorIndex + 1))
+      };
+    })
+    .find((part) => part?.key === name)?.value;
+};
+
 const resetTokenFromRequest = (req: Request) => {
-  const token = req.get('x-password-reset-token');
+  const token = req.get('x-password-reset-token') || cookieValue(req, 'passwordResetToken');
   if (!token) throw new AppError('Password reset token is required', 400);
   return token;
 };
@@ -67,7 +87,7 @@ authRouter.post(
       user.userType === 'daycare' ? 'Daycare account pending approval' : 'New parent account',
       `${user.fullName} registered with ${user.email}.`,
       { userId: user._id.toString(), link: '/user-management', role: user.userType === 'daycare' ? 'Daycare' : 'Parent' }
-    ).catch((error) => console.error('Failed to create admin account notification', error));
+    ).catch(() => {});
     const acceptedInvitations = await InvitationWorkflowService.acceptPendingCareCircleInvitationsForUser(user._id.toString());
     const accessToken = TokenService.signAccessToken(user._id);
     const refreshToken = await TokenService.issueRefreshToken(user._id, { ip: req.ip, userAgent: req.get('user-agent') });
@@ -220,7 +240,13 @@ authRouter.post(
     user.passwordResetSessionHash = hashToken(resetToken);
     user.passwordResetSessionExpiresAt = new Date(Date.now() + 10 * 60 * 1000);
     await user.save();
-    ok(res, 'OTP verified', { resetToken });
+    res.cookie('passwordResetToken', resetToken, {
+      httpOnly: true,
+      sameSite: 'lax',
+      secure: env.NODE_ENV === 'production',
+      maxAge: 10 * 60 * 1000
+    });
+    ok(res, 'OTP verified');
   })
 );
 
@@ -240,6 +266,11 @@ authRouter.post(
     user.passwordResetSessionHash = undefined;
     user.passwordResetSessionExpiresAt = undefined;
     await user.save();
+    res.clearCookie('passwordResetToken', {
+      httpOnly: true,
+      sameSite: 'lax',
+      secure: env.NODE_ENV === 'production'
+    });
     ok(res, 'Password reset successful');
   })
 );
@@ -256,6 +287,11 @@ authRouter.post(
   })
 );
 
+authRouter.delete('/account', requireAuth, asyncHandler(async (req, res) => {
+  const deletion = await AccountDeletionService.deleteUserAccount(req.user!);
+  ok(res, 'Account deleted', deletion);
+}));
+
 authRouter.get('/me', requireAuth, asyncHandler(async (req, res) => {
   const data: Record<string, unknown> = { user: req.user };
   if (req.user!.userType === 'daycare' && req.user!.status === 'active') {
@@ -269,3 +305,4 @@ authRouter.get('/me', requireAuth, asyncHandler(async (req, res) => {
 authRouter.use((req, _res, next) => {
   next(new AppError(`Route not found: ${req.method} /auth${req.path}`, 404));
 });
+

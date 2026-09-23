@@ -96,9 +96,7 @@ export class ObservationService {
 
   private static queueMediaProcessing(job: MediaProcessingJob) {
     setImmediate(() => {
-      void this.processMediaObservation(job).catch((error) => {
-        console.error('Failed to process media observation', error);
-      });
+      void this.processMediaObservation(job).catch(() => {});
     });
   }
 
@@ -149,9 +147,7 @@ export class ObservationService {
         }
       );
 
-      void DevelopmentScoringService.refreshChildDevelopmentSnapshot(job.childId).catch((error) => {
-        console.error('Failed to refresh child development snapshot after media processing', error);
-      });
+      void DevelopmentScoringService.refreshChildDevelopmentSnapshot(job.childId).catch(() => {});
     } catch (error) {
       await Observation.updateOne(
         { _id: job.observationId },
@@ -311,9 +307,7 @@ export class ObservationService {
     }
 
     if (!isDraft) {
-      void DevelopmentScoringService.refreshChildDevelopmentSnapshot(input.childId).catch((error) => {
-        console.error('Failed to refresh child development snapshot', error);
-      });
+      void DevelopmentScoringService.refreshChildDevelopmentSnapshot(input.childId).catch(() => {});
     }
 
     return observation;
@@ -443,9 +437,7 @@ export class ObservationService {
         });
       }
 
-      void DevelopmentScoringService.refreshChildDevelopmentSnapshot(observation.childId.toString()).catch((error) => {
-        console.error('Failed to refresh child development snapshot', error);
-      });
+      void DevelopmentScoringService.refreshChildDevelopmentSnapshot(observation.childId.toString()).catch(() => {});
     }
 
     return observation;

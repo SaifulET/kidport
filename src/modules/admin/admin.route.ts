@@ -50,6 +50,63 @@ const initials = (name: string) =>
     .slice(0, 2)
     .toUpperCase();
 
+const ticketTitleFromMessage = (text: string) => {
+  const normalized = text.replace(/\s+/g, ' ').trim();
+  if (!normalized) return 'Support chat';
+  return normalized.length > 60 ? `${normalized.slice(0, 57)}...` : normalized;
+};
+
+const legacyAutoReplyText = 'Thanks for reaching out! Let me help you with that. Could you provide more details?';
+const nonLegacySupportMessageFilter = { text: { $ne: legacyAutoReplyText } };
+
+let supportBackfillCheckedAt = 0;
+let supportBackfillPromise: Promise<void> | null = null;
+
+const backfillSupportTickets = async () => {
+  if (Date.now() - supportBackfillCheckedAt < 5 * 60 * 1000) return;
+  if (supportBackfillPromise) return supportBackfillPromise;
+
+  supportBackfillPromise = (async () => {
+  const startedAt = Date.now();
+  const [messageUserIds, issueUserIds] = await Promise.all([
+    SupportMessage.distinct('userId'),
+    SupportIssue.distinct('userId')
+  ]);
+  const existingIssueUserIds = new Set(issueUserIds.map((userId) => userId.toString()));
+  const missingUserIds = messageUserIds.filter((userId) => !existingIssueUserIds.has(userId.toString()));
+
+  if (missingUserIds.length === 0) {
+    supportBackfillCheckedAt = Date.now();
+        return;
+  }
+
+  const latestMessages = await SupportMessage.aggregate([
+    { $match: { userId: { $in: missingUserIds } } },
+    { $sort: { createdAt: -1 } },
+    { $group: { _id: '$userId', latest: { $first: '$$ROOT' } } }
+  ]);
+
+  await SupportIssue.insertMany(
+    latestMessages.map((item) => ({
+      userId: item._id,
+      title: ticketTitleFromMessage(item.latest.text),
+      description: item.latest.text,
+      urgency: 'low',
+      status: 'open'
+    })),
+    { ordered: false }
+  );
+  supportBackfillCheckedAt = Date.now();
+    })().finally(() => {
+    supportBackfillPromise = null;
+  });
+
+  return supportBackfillPromise;
+};
+
+const removeLegacyAutoReplies = () =>
+  SupportMessage.deleteMany({ sender: 'support', text: legacyAutoReplyText }).catch(() => {});
+
 const formatAge = (dateOfBirth: Date) => {
   const now = new Date();
   let months = (now.getFullYear() - dateOfBirth.getFullYear()) * 12 + now.getMonth() - dateOfBirth.getMonth();
@@ -80,6 +137,10 @@ const slugify = (value: string) =>
 
 const userRoleLabel = (userType: string) => (userType === 'daycare' ? 'Daycare' : userType === 'admin' ? 'Admin' : 'Parent');
 const userStatus = (status: string) => (status === 'disabled' ? 'Blocked' : status === 'deleted' ? 'Deleted' : status === 'pending' ? 'Pending' : 'Active');
+let dashboardCache: { expiresAt: number; data: unknown } | null = null;
+let observationStatsCache:
+  | { expiresAt: number; data: { total: number; today: number; byDaycare: number; byParent: number } }
+  | null = null;
 
 const dashboardWindow = () =>
   Array.from({ length: 7 }, (_, index) => {
@@ -88,6 +149,11 @@ const dashboardWindow = () =>
   });
 
 adminRouter.get('/dashboard', asyncHandler(async (_req, res) => {
+  if (dashboardCache && dashboardCache.expiresAt > Date.now()) {
+    ok(res, 'Admin dashboard', dashboardCache.data);
+    return;
+  }
+
   const today = startOfDay();
   const weekStart = daysAgo(6);
 
@@ -125,13 +191,14 @@ adminRouter.get('/dashboard', asyncHandler(async (_req, res) => {
       .populate('childId', 'fullName')
       .sort({ occurredAt: -1 })
       .limit(5)
+      .lean()
   ]);
 
   const activityByDay = new Map(activityUsers.map((item) => [item._id, item.value]));
   const observationsByDay = new Map(observationTrend.map((item) => [item._id, item.value]));
   const dates = dashboardWindow();
 
-  ok(res, 'Admin dashboard', {
+  const data = {
     stats: {
       totalDaycares,
       totalChildren,
@@ -160,7 +227,10 @@ adminRouter.get('/dashboard', asyncHandler(async (_req, res) => {
       { id: 'ai-review', type: 'danger', title: `${flaggedObservations} AI-reviewed observations available`, time: 'Live' },
       { id: 'api-health', type: 'info', title: 'Admin API connected successfully', time: 'Now' }
     ]
-  });
+  };
+
+  dashboardCache = { expiresAt: Date.now() + 10_000, data };
+  ok(res, 'Admin dashboard', data);
 }));
 
 adminRouter.get('/users', asyncHandler(async (req, res) => {
@@ -436,51 +506,113 @@ adminRouter.post(
 );
 
 adminRouter.get('/observations', asyncHandler(async (req, res) => {
+  const startedAt = Date.now();
   const { page, limit, skip } = paginationFromQuery(req.query);
   const type = typeof req.query.type === 'string' ? req.query.type : undefined;
   const search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
   const filter: Record<string, unknown> = { status: 'active' };
   if (type && type !== 'All Types') filter.type = type;
   if (search) filter.$or = [{ title: { $regex: search, $options: 'i' } }, { text: { $regex: search, $options: 'i' } }, { description: { $regex: search, $options: 'i' } }];
+  const parsedAt = Date.now();
+  const hasListFilter = Boolean(type && type !== 'All Types') || Boolean(search);
 
-  const [total, today, byDaycare, byParent, observations] = await Promise.all([
-    Observation.countDocuments(filter),
-    Observation.countDocuments({ status: 'active', occurredAt: { $gte: startOfDay() } }),
-    Observation.countDocuments({ status: 'active', daycareId: { $exists: true } }),
-    Observation.countDocuments({ status: 'active', daycareId: { $exists: false } }),
-    Observation.find(filter)
-      .populate('childId', 'fullName')
-      .populate('authorId', 'fullName')
-      .populate('domainId', 'name slug')
-      .sort({ occurredAt: -1 })
-      .skip(skip)
-      .limit(limit)
+  const timings: Record<string, number> = {};
+  const timed = async <T>(label: string, promise: Promise<T>) => {
+    const stepStartedAt = Date.now();
+    const result = await promise;
+    timings[label] = Date.now() - stepStartedAt;
+    return result;
+  };
+
+  const statsPromise =
+    observationStatsCache && observationStatsCache.expiresAt > Date.now()
+      ? Promise.resolve(observationStatsCache.data).then((data) => {
+          timings.stats = 0;
+          return data;
+        })
+      : timed('stats', Promise.all([
+          timed('statsTotal', Observation.countDocuments({ status: 'active' })),
+          timed('statsToday', Observation.countDocuments({ status: 'active', occurredAt: { $gte: startOfDay() } })),
+          timed('statsByDaycare', Observation.countDocuments({ status: 'active', daycareId: { $exists: true } })),
+          timed('statsByParent', Observation.countDocuments({ status: 'active', daycareId: { $exists: false } }))
+        ])).then(([total, today, byDaycare, byParent]) => {
+          const data = { total, today, byDaycare, byParent };
+          observationStatsCache = { expiresAt: Date.now() + 30_000, data };
+          return data;
+        });
+
+  const observationsQuery = Observation.find(filter)
+    .select('type title text description childId authorId occurredAt domainId stage aiMetadata')
+    .sort({ occurredAt: -1 })
+    .skip(skip)
+    .limit(limit)
+    .lean();
+
+  if (!search) {
+    observationsQuery.hint(
+      type && type !== 'All Types'
+        ? { status: 1, type: 1, occurredAt: -1 }
+        : { status: 1, occurredAt: -1 }
+    );
+  }
+
+  const [stats, rawObservations] = await Promise.all([
+    statsPromise,
+    timed('findObservations', observationsQuery)
   ]);
-
+  const relationStartedAt = Date.now();
+  const childIds = [...new Set(rawObservations.map((observation: any) => observation.childId?.toString()).filter(Boolean))];
+  const authorIds = [...new Set(rawObservations.map((observation: any) => observation.authorId?.toString()).filter(Boolean))];
+  const domainIds = [...new Set(rawObservations.map((observation: any) => observation.domainId?.toString()).filter(Boolean))];
+  const [children, authors, domains] = await Promise.all([
+    timed('lookupChildren', Child.find({ _id: { $in: childIds } }).select('fullName').lean()),
+    timed('lookupAuthors', User.find({ _id: { $in: authorIds } }).select('fullName').lean()),
+    timed('lookupDomains', DevelopmentDomain.find({ _id: { $in: domainIds } }).select('name slug').lean())
+  ]);
+  timings.lookupRelations = Date.now() - relationStartedAt;
+  const childById = new Map(children.map((child: any) => [child._id.toString(), child]));
+  const authorById = new Map(authors.map((author: any) => [author._id.toString(), author]));
+  const domainById = new Map(domains.map((domain: any) => [domain._id.toString(), domain]));
+  const observations = rawObservations.map((observation: any) => ({
+    ...observation,
+    childId: childById.get(observation.childId?.toString()),
+    authorId: authorById.get(observation.authorId?.toString()),
+    domainId: domainById.get(observation.domainId?.toString())
+  }));
+  const total = hasListFilter
+    ? await timed('totalCount', Observation.countDocuments(filter))
+    : (() => {
+        timings.totalCount = 0;
+        return stats.total;
+      })();
+  const queriedAt = Date.now();
+  const payload = observations.map((observation: any) => ({
+    id: observation._id.toString(),
+    type: observation.type,
+    title: observation.title || observation.text || 'Untitled observation',
+    subtitle: observation.description || observation.text || '',
+    child: observation.childId?.fullName ?? 'Unknown child',
+    author: observation.authorId?.fullName ?? 'Unknown author',
+    time: observation.occurredAt,
+    domain: observation.domainId
+      ? {
+          id: observation.domainId._id?.toString?.() ?? observation.domainId.toString(),
+          name: observation.domainId.name ?? null
+        }
+      : null,
+    domainId: observation.domainId?._id?.toString?.() ?? observation.domainId?.toString?.() ?? null,
+    domainName: observation.domainId?.name ?? null,
+    tags: [observation.domainId?.name, observation.stage].filter(Boolean),
+    insights: observation.aiMetadata ? 1 : 0,
+    status: observation.aiMetadata ? ['Processed'] : ['Pending']
+  }));
+  const mappedAt = Date.now();
+  
   res.json({
     success: true,
     message: 'Admin observations',
-    data: observations.map((observation: any) => ({
-      id: observation._id.toString(),
-      type: observation.type,
-      title: observation.title || observation.text || 'Untitled observation',
-      subtitle: observation.description || observation.text || '',
-      child: observation.childId?.fullName ?? 'Unknown child',
-      author: observation.authorId?.fullName ?? 'Unknown author',
-      time: observation.occurredAt,
-      domain: observation.domainId
-        ? {
-            id: observation.domainId._id?.toString?.() ?? observation.domainId.toString(),
-            name: observation.domainId.name ?? null
-          }
-        : null,
-      domainId: observation.domainId?._id?.toString?.() ?? observation.domainId?.toString?.() ?? null,
-      domainName: observation.domainId?.name ?? null,
-      tags: [observation.domainId?.name, observation.stage].filter(Boolean),
-      insights: observation.aiMetadata ? 1 : 0,
-      status: observation.aiMetadata ? ['Processed'] : ['Pending']
-    })),
-    stats: { total, today, byDaycare, byParent },
+    data: payload,
+    stats: { total, today: stats.today, byDaycare: stats.byDaycare, byParent: stats.byParent },
     pagination: { page, limit, total, totalPages: Math.ceil(total / limit) }
   });
 }));
@@ -489,6 +621,97 @@ adminRouter.delete('/observations/:observationId', asyncHandler(async (req, res)
   const observation = await Observation.findByIdAndUpdate(objectIdOrThrow(req.params.observationId, 'Observation id'), { $set: { status: 'deleted' } }, { new: true });
   if (!observation) throw new AppError('Observation not found', 404);
   ok(res, 'Observation deleted', observation);
+}));
+
+adminRouter.get('/milestones-ai', asyncHandler(async (_req, res) => {
+  const today = startOfDay();
+  const weekStart = daysAgo(6);
+  const days = dashboardWindow();
+
+  const [
+    totalMilestones,
+    aiProcessed,
+    flaggedForReview,
+    activity,
+    domains,
+    domainMilestones,
+    domainPending
+  ] = await Promise.all([
+    Observation.countDocuments({ status: 'active', isMilestone: true }),
+    Observation.countDocuments({ status: 'active', aiMetadata: { $exists: true } }),
+    Observation.countDocuments({ status: 'active', 'aiMetadata.flagged': true }),
+    Observation.aggregate([
+      { $match: { status: 'active', occurredAt: { $gte: weekStart } } },
+      {
+        $group: {
+          _id: { $dateToString: { format: '%Y-%m-%d', date: '$occurredAt' } },
+          processed: { $sum: { $cond: [{ $ifNull: ['$aiMetadata', false] }, 1, 0] } },
+          milestones: { $sum: { $cond: ['$isMilestone', 1, 0] } }
+        }
+      }
+    ]),
+    DevelopmentDomain.find({ status: 'active' }).sort({ sortOrder: 1, name: 1 }).select('name slug sortOrder').lean(),
+    Observation.aggregate([
+      { $match: { status: 'active', isMilestone: true, domainId: { $exists: true } } },
+      { $group: { _id: '$domainId', achieved: { $sum: 1 } } }
+    ]),
+    Observation.aggregate([
+      { $match: { status: 'active', isMilestone: { $ne: true }, domainId: { $exists: true } } },
+      { $group: { _id: '$domainId', pending: { $sum: 1 } } }
+    ])
+  ]);
+
+  const activityByDay = new Map(activity.map((item) => [item._id, item]));
+  const milestoneByDomain = new Map(domainMilestones.map((item) => [item._id.toString(), item.achieved]));
+  const pendingByDomain = new Map(domainPending.map((item) => [item._id.toString(), item.pending]));
+  const accurate = Math.max(aiProcessed - flaggedForReview, 0);
+  const accuracyRate = aiProcessed > 0 ? Math.round((accurate / aiProcessed) * 1000) / 10 : 0;
+  const reviewedPercent = aiProcessed > 0 ? Math.round((flaggedForReview / aiProcessed) * 100) : 0;
+  const accuratePercent = aiProcessed > 0 ? Math.max(0, 100 - reviewedPercent) : 0;
+
+  const domainStats = domains.map((domain) => {
+    const id = domain._id.toString();
+    const achieved = milestoneByDomain.get(id) ?? 0;
+    const pending = pendingByDomain.get(id) ?? 0;
+    const total = achieved + pending;
+    return {
+      id,
+      name: domain.name,
+      achieved,
+      pending,
+      total,
+      completionRate: total > 0 ? Math.round((achieved / total) * 1000) / 10 : 0
+    };
+  });
+
+  ok(res, 'Admin milestones and AI analytics', {
+    stats: {
+      totalMilestones,
+      aiProcessed,
+      accuracyRate,
+      flaggedForReview
+    },
+    lineData: days.map((date) => {
+      const key = date.toISOString().slice(0, 10);
+      const item = activityByDay.get(key);
+      return {
+        name: weekdayKey(date),
+        processed: item?.processed ?? 0,
+        milestones: item?.milestones ?? 0
+      };
+    }),
+    pieData: [
+      { name: 'Accurate', value: accuratePercent, color: '#10b981' },
+      { name: 'Reviewed', value: reviewedPercent, color: '#f59e0b' },
+      { name: 'Corrected', value: 0, color: '#ef4444' }
+    ],
+    barData: domainStats.map((domain) => ({
+      name: domain.name,
+      achieved: domain.achieved,
+      pending: domain.pending
+    })),
+    domains: domainStats
+  });
 }));
 
 adminRouter.get('/domains', asyncHandler(async (req, res) => {
@@ -541,9 +764,7 @@ adminRouter.post(
       ? await DevelopmentDomain.findByIdAndUpdate(existing._id, { $set: { name, slug, status: 'active' } }, { new: true })
       : await DevelopmentDomain.create({ name, slug });
     const observationCount = await Observation.countDocuments({ status: 'active', domainId: domain!._id });
-    void NotificationService.createDomainCreatedNotifications(domain!._id.toString(), domain!.name, req.user!._id.toString()).catch((error) => {
-      console.error('Failed to create domain notifications', error);
-    });
+    void NotificationService.createDomainCreatedNotifications(domain!._id.toString(), domain!.name, req.user!._id.toString()).catch(() => {});
 
     ok(res, 'Domain created', {
       id: domain!._id.toString(),
@@ -659,19 +880,27 @@ adminRouter.patch('/notifications/read-all', asyncHandler(async (_req, res) => {
 }));
 
 adminRouter.get('/support/tickets', asyncHandler(async (req, res) => {
+  const startedAt = Date.now();
   const { page, limit, skip } = paginationFromQuery(req.query);
+  const parsedAt = Date.now();
+  void removeLegacyAutoReplies();
+  void backfillSupportTickets().catch(() => {});
+  const backfilledAt = Date.now();
+
   const [total, issues] = await Promise.all([
     SupportIssue.countDocuments({}),
-    SupportIssue.find({}).populate('userId', 'fullName email').sort({ updatedAt: -1 }).skip(skip).limit(limit)
+    SupportIssue.find({}).populate('userId', 'fullName email').sort({ updatedAt: -1 }).skip(skip).limit(limit).lean()
   ]);
+  const issuesFetchedAt = Date.now();
   const userIds = issues.map((issue) => issue.userId?._id).filter(Boolean);
   const latestMessages = await SupportMessage.aggregate([
-    { $match: { userId: { $in: userIds } } },
+    { $match: { userId: { $in: userIds }, text: { $ne: legacyAutoReplyText } } },
     { $sort: { createdAt: -1 } },
     { $group: { _id: '$userId', latest: { $first: '$$ROOT' }, count: { $sum: 1 } } }
   ]);
+  const messagesAggregatedAt = Date.now();
   const latestMap = new Map(latestMessages.map((item) => [item._id.toString(), item]));
-
+  
   paginated(
     res,
     'Admin support tickets',
@@ -700,26 +929,33 @@ adminRouter.get('/support/tickets', asyncHandler(async (req, res) => {
 }));
 
 adminRouter.get('/support/tickets/:userId/messages', asyncHandler(async (req, res) => {
-  const { page, limit, skip } = paginationFromQuery(req.query);
+  const startedAt = Date.now();
+  const { page, limit } = paginationFromQuery(req.query);
   const userId = objectIdOrThrow(req.params.userId, 'User id');
-  const [total, messages] = await Promise.all([
-    SupportMessage.countDocuments({ userId }),
-    SupportMessage.find({ userId }).sort({ createdAt: 1 }).skip(skip).limit(limit)
+  const before = typeof req.query.before === 'string' ? new Date(req.query.before) : null;
+  const messageFilter: Record<string, unknown> = { userId, ...nonLegacySupportMessageFilter };
+  if (before && !Number.isNaN(before.getTime())) messageFilter.createdAt = { $lt: before };
+  const parsedAt = Date.now();
+  void removeLegacyAutoReplies();
+  const [total, messagesDesc] = await Promise.all([
+    SupportMessage.countDocuments({ userId, ...nonLegacySupportMessageFilter }),
+    SupportMessage.find(messageFilter).sort({ createdAt: -1 }).limit(limit + 1).lean()
   ]);
-  paginated(
-    res,
-    'Admin support messages',
-    messages.map((message) => ({
+  const hasMore = messagesDesc.length > limit;
+  const messages = messagesDesc.slice(0, limit).reverse();
+  const messagesFetchedAt = Date.now();
+    res.json({
+    success: true,
+    message: 'Admin support messages',
+    data: messages.map((message) => ({
       id: message._id.toString(),
       sender: message.sender === 'support' ? 'agent' : 'parent',
       senderName: message.sender === 'support' ? 'Support Team' : 'Parent',
       text: message.text,
       time: message.createdAt
     })),
-    page,
-    limit,
-    total
-  );
+    pagination: { page, limit, total, totalPages: Math.ceil(total / limit), hasMore }
+  });
 }));
 
 adminRouter.post(

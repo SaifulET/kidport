@@ -9,14 +9,12 @@ export const start = async () => {
   const server = createServer(app);
   initializeSocket(server);
   server.listen(env.PORT, () => {
-    console.log(`Kidport API listening on port ${env.PORT}`);
-  });
+      });
 };
 
 if (require.main === module) {
   start().catch((error) => {
-    console.error('Failed to start server', error);
-    process.exit(1);
+        process.exit(1);
   });
 }
 

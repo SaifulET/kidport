@@ -29,28 +29,50 @@ const messagePayload = (message: InstanceType<typeof SupportMessage>) => ({
   status: message.status
 });
 
-const welcomeText = (name: string) => {
-  const firstName = name.trim().split(/\s+/)[0] || 'there';
-  return `Hi ${firstName}! I'm Maya from KidPort support. How can I help you today?`;
+const legacyAutoReplyText = 'Thanks for reaching out! Let me help you with that. Could you provide more details?';
+const nonLegacySupportMessageFilter = { text: { $ne: legacyAutoReplyText } };
+
+const removeLegacyAutoReplies = () =>
+  SupportMessage.deleteMany({ sender: 'support', text: legacyAutoReplyText }).catch(() => {});
+
+const ticketTitleFromMessage = (text: string) => {
+  const normalized = text.replace(/\s+/g, ' ').trim();
+  if (!normalized) return 'Support chat';
+  return normalized.length > 60 ? `${normalized.slice(0, 57)}...` : normalized;
+};
+
+const ensureSupportTicket = async (userId: unknown, text: string) => {
+  const existing = await SupportIssue.findOne({
+    userId,
+    status: { $in: ['open', 'in_progress'] }
+  }).sort({ updatedAt: -1 });
+
+  if (existing) {
+    existing.set({
+      description: existing.description || text,
+      status: existing.status === 'open' ? 'open' : 'in_progress'
+    });
+    await existing.save();
+    return existing;
+  }
+
+  return SupportIssue.create({
+    userId,
+    title: ticketTitleFromMessage(text),
+    description: text,
+    urgency: 'low',
+    status: 'open'
+  });
 };
 
 supportRouter.get('/support/messages', asyncHandler(async (req, res) => {
   const { page, limit, skip } = paginationFromQuery(req.query);
   const userId = req.user!._id;
-  const existingCount = await SupportMessage.countDocuments({ userId });
-
-  if (existingCount === 0) {
-    await SupportMessage.create({
-      userId,
-      sender: 'support',
-      text: welcomeText(req.user!.fullName),
-      status: 'sent'
-    });
-  }
+  void removeLegacyAutoReplies();
 
   const [total, messages] = await Promise.all([
-    SupportMessage.countDocuments({ userId }),
-    SupportMessage.find({ userId }).sort({ createdAt: 1 }).skip(skip).limit(limit)
+    SupportMessage.countDocuments({ userId, ...nonLegacySupportMessageFilter }),
+    SupportMessage.find({ userId, ...nonLegacySupportMessageFilter }).sort({ createdAt: 1 }).skip(skip).limit(limit)
   ]);
   res.json({
     success: true,
@@ -68,25 +90,22 @@ supportRouter.post('/support/messages', asyncHandler(async (req, res) => {
   if (!text) throw new AppError('Message text is required', 400);
 
   const userId = req.user!._id;
+  void removeLegacyAutoReplies();
+  const issue = await ensureSupportTicket(userId, text);
   const sentMessage = await SupportMessage.create({
     userId,
     sender: 'user',
     text,
     status: 'sent'
   });
-  const autoReply = await SupportMessage.create({
-    userId,
-    sender: 'support',
-    text: 'Thanks for reaching out! Let me help you with that. Could you provide more details?',
-    status: 'sent'
-  });
+  issue.updatedAt = sentMessage.createdAt;
+  await issue.save();
+  emitSupportTicket(issue, req.user!);
   emitSupportMessage(sentMessage);
-  emitSupportMessage(autoReply);
 
   ok(res, 'Support message sent', {
     thread: supportThread(userId.toString()),
-    sentMessage: messagePayload(sentMessage),
-    autoReply: messagePayload(autoReply)
+    sentMessage: messagePayload(sentMessage)
   }, 201);
 }));
 
@@ -99,7 +118,7 @@ supportRouter.post('/support/issues', upload.array('attachments', 5), asyncHandl
     ticketId: issue._id.toString(),
     userId: req.user!._id.toString(),
     link: '/support'
-  }).catch((error) => console.error('Failed to create admin support notification', error));
+  }).catch(() => {});
   ok(res, 'Support issue submitted', issue, 201);
 }));
 
@@ -116,3 +135,4 @@ supportRouter.post('/feature-requests', upload.array('images', 5), asyncHandler(
   const feature = await FeatureRequest.create({ ...req.body, userId: req.user!._id, images });
   ok(res, 'Feature request submitted', feature, 201);
 }));
+

@@ -3,6 +3,7 @@ import { requireAuth } from '../../middlewares/auth';
 import { asyncHandler } from '../../utils/asyncHandler';
 import { ok } from '../../utils/apiResponse';
 import { UserSettings } from './user-settings.model';
+import { AccountDeletionService } from '../../services/AccountDeletionService';
 
 export const settingsRouter = Router();
 settingsRouter.use(requireAuth);
@@ -43,9 +44,7 @@ settingsRouter.patch(
 settingsRouter.delete(
   '/account',
   asyncHandler(async (req, res) => {
-    req.user!.status = 'deleted';
-    req.user!.deletedAt = new Date();
-    await req.user!.save();
-    ok(res, 'Account deleted');
+    const deletion = await AccountDeletionService.deleteUserAccount(req.user!);
+    ok(res, 'Account deleted', deletion);
   })
 );

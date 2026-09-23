@@ -482,6 +482,38 @@ Response:
 }
 ```
 
+### DELETE `/auth/account`
+
+Auth: required
+
+Deletes the current signed-in account. The backend marks the account as deleted, clears password-reset sessions, and revokes all active refresh tokens for the user.
+
+Request body: none
+
+Response:
+
+```json
+{
+  "success": true,
+  "message": "Account deleted",
+  "data": {
+    "deletedAt": "2026-09-23T00:00:00.000Z",
+    "userId": "66f..."
+  }
+}
+```
+
+App behavior after success:
+
+- Remove all local access and refresh tokens.
+- Clear cached user/session state.
+- Reset navigation to the sign-in screen.
+
+Compatibility aliases:
+
+- `DELETE /account`
+- `DELETE /settings/account`
+
 For an approved daycare account, the response also includes `daycareId` and `daycare`, derived from the bearer token:
 
 ```json

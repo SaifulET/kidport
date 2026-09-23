@@ -34,6 +34,8 @@ const userSchema = new Schema(
   { timestamps: true }
 );
 
+userSchema.index({ userType: 1, status: 1, createdAt: -1 });
+
 const transformProfilePhoto = (_doc: unknown, ret: Record<string, unknown>) => {
   const profilePhoto = ret.profilePhoto as { url?: string } | string | undefined;
   ret.profilePhoto = typeof profilePhoto === 'string' ? profilePhoto : profilePhoto?.url ?? null;

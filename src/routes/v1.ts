@@ -20,6 +20,7 @@ import { adminRouter } from '../modules/admin/admin.route';
 import { requireAuth } from '../middlewares/auth';
 import { ok, paginated } from '../utils/apiResponse';
 import { paginationFromQuery } from '../utils/pagination';
+import { AccountDeletionService } from '../services/AccountDeletionService';
 
 export const v1Router = Router();
 
@@ -44,10 +45,8 @@ v1Router.use(supportRouter);
 v1Router.use('/admin', adminRouter);
 
 v1Router.delete('/account', requireAuth, async (req, res) => {
-  req.user!.status = 'deleted';
-  req.user!.deletedAt = new Date();
-  await req.user!.save();
-  ok(res, 'Account deleted');
+  const deletion = await AccountDeletionService.deleteUserAccount(req.user!);
+  ok(res, 'Account deleted', deletion);
 });
 
 v1Router.get('/milestones', requireAuth, (req, res) => {

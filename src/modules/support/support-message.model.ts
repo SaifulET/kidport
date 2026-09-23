@@ -12,6 +12,7 @@ const supportMessageSchema = new Schema(
 );
 
 supportMessageSchema.index({ userId: 1, createdAt: 1 });
+supportMessageSchema.index({ userId: 1, createdAt: -1 });
 
 export type SupportMessageAttrs = InferSchemaType<typeof supportMessageSchema>;
 export const SupportMessage = model('SupportMessage', supportMessageSchema);

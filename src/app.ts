@@ -20,6 +20,36 @@ const ensureDatabase = async (_req: Request, _res: Response, next: NextFunction)
   }
 };
 
+const requestTrace = (req: Request, res: Response, next: NextFunction) => {
+  const requestId =
+    req.get('x-request-id') ||
+    `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const receivedAt = Date.now();
+  const receivedAtIso = new Date(receivedAt).toISOString();
+  const clientSentAt = req.get('x-client-sent-at') || null;
+
+  res.setHeader('x-request-id', requestId);
+  res.setHeader('x-backend-received-at', receivedAtIso);
+
+  
+  res.on('finish', () => {
+    const respondedAt = Date.now();
+    const respondedAtIso = new Date(respondedAt).toISOString();
+      });
+
+  const originalEnd = res.end.bind(res) as (...args: any[]) => Response;
+  res.end = ((...args: any[]) => {
+    if (!res.headersSent) {
+      const respondedAt = Date.now();
+      res.setHeader('x-backend-responded-at', new Date(respondedAt).toISOString());
+      res.setHeader('x-backend-duration-ms', String(respondedAt - receivedAt));
+    }
+    return originalEnd(...args);
+  }) as typeof res.end;
+
+  next();
+};
+
 export const createApp = () => {
   const app = express();
 
@@ -29,6 +59,7 @@ export const createApp = () => {
   app.use(express.json({ limit: '2mb' }));
   app.use(express.urlencoded({ extended: true }));
   app.use(mongoSanitize());
+  app.use(requestTrace);
   app.use(
     rateLimit({
       windowMs: 15 * 60 * 1000,

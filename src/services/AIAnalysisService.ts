@@ -177,11 +177,9 @@ export class AIAnalysisService {
 
   private static logAIError(context: string, error: unknown) {
     if (error instanceof Error && error.name === 'APIConnectionTimeoutError') {
-      console.warn(`${context} timed out after ${env.OPENAI_REQUEST_TIMEOUT_MS}ms; using fallback.`);
-      return;
+            return;
     }
-    console.error(context, error);
-  }
+      }
 
   static disclaimer =
     'This report is generated from caregiver-submitted observations and AI-assisted analysis. It is not a clinical diagnosis and should not replace professional pediatric evaluation.';

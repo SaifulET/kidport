@@ -101,9 +101,7 @@ const queueCareCircleInvitation = async (input: {
     message: input.message,
     expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
   });
-  void EmailService.careCircleInvite(email, token, child.fullName, input.role, input.message).catch((error) => {
-    console.error('Failed to send care circle invitation email', error);
-  });
+  void EmailService.careCircleInvite(email, token, child.fullName, input.role, input.message).catch(() => {});
   void NotificationService.createChildInvitationNotifications({
     childId: input.childId,
     invitationId: invitation._id.toString(),
@@ -113,7 +111,7 @@ const queueCareCircleInvitation = async (input: {
     invitedEmail: email,
     invitationType: 'care_circle',
     role: input.role
-  }).catch((error) => console.error('Failed to create care circle invitation notifications', error));
+  }).catch(() => {});
 
   return { invitationId: invitation._id, emailStatus: 'queued', type: 'care_circle' };
 };
@@ -176,9 +174,7 @@ const queueDaycareInvitation = async (input: { childId: string; daycareId: strin
     { $set: { assignedBy: input.invitedById, status: 'active', acceptedAt: new Date() }, $unset: { classroomId: '', acceptedBy: '' } },
     { upsert: true }
   );
-  void EmailService.daycareInvite(invitation.email, token, child.fullName).catch((error) => {
-    console.error('Failed to send daycare invitation email', error);
-  });
+  void EmailService.daycareInvite(invitation.email, token, child.fullName).catch(() => {});
   void NotificationService.createChildInvitationNotifications({
     childId: input.childId,
     invitationId: invitation._id.toString(),
@@ -188,7 +184,7 @@ const queueDaycareInvitation = async (input: { childId: string; daycareId: strin
     childName: child.fullName,
     invitedEmail: invitation.email,
     invitationType: 'daycare_child_assignment'
-  }).catch((error) => console.error('Failed to create daycare invitation notifications', error));
+  }).catch(() => {});
 
   return { invitationId: invitation._id, emailStatus: 'queued', type: 'daycare_child_assignment' };
 };
@@ -462,7 +458,7 @@ childrenRouter.post(
       childId: child._id.toString(),
       userId: req.user!._id.toString(),
       link: '/children'
-    }).catch((error) => console.error('Failed to create admin child notification', error));
+    }).catch(() => {});
     ok(res, 'Child created', childResponse(child), 201);
   })
 );
@@ -520,11 +516,9 @@ childrenRouter.patch(
   upload.single('photo'),
   validate(updateChildSchema),
   asyncHandler(async (req, res) => {
-    console.log('Received request to update child:', req.params.childId, 'with body:', req.body);
-    const payload = Object.fromEntries(Object.entries(childPayload(req.body)).filter(([, value]) => value !== undefined));
+        const payload = Object.fromEntries(Object.entries(childPayload(req.body)).filter(([, value]) => value !== undefined));
     if (req.file) payload.profilePhoto = await StorageService.uploadBuffer(`children/${req.params.childId}/profile`, req.file);
-    console.log('Updating child with payload:', payload);
-    const child = await Child.findByIdAndUpdate(req.params.childId, { $set: payload }, { new: true });
+        const child = await Child.findByIdAndUpdate(req.params.childId, { $set: payload }, { new: true });
     ok(res, 'Child updated', child ? childResponse(child) : null);
   })
 );
@@ -738,3 +732,4 @@ childrenRouter.post(
     ok(res, 'Daycare invitation queued', data, 201);
   })
 );
+

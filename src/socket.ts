@@ -164,6 +164,8 @@ export const initializeSocket = (server: HttpServer) => {
           text,
           status: 'sent'
         });
+        issue.updatedAt = message.createdAt;
+        await issue.save();
 
         if (freshUser) emitSupportTicket(issue, freshUser);
         emitSupportMessage(message);
@@ -173,8 +175,7 @@ export const initializeSocket = (server: HttpServer) => {
           message: messageForUser(message)
         });
       } catch (error) {
-        console.error('Failed to handle chat:message', error);
-        ack?.({ ok: false, error: 'Unable to send message. Please try again.' });
+                ack?.({ ok: false, error: 'Unable to send message. Please try again.' });
         socket.emit('chat:error', { message: 'Unable to send message. Please try again.' });
       }
     });

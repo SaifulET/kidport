@@ -9,10 +9,12 @@ import { User } from '../modules/users/user.model';
 import { DevelopmentDomain } from '../modules/domains/development-domain.model';
 import { DevelopmentIndicator } from '../modules/domains/development-indicator.model';
 import { Observation } from '../modules/observations/observation.model';
+import { Report } from '../modules/reports/report.model';
 import { NotificationService } from './NotificationService';
 import { StorageService, type StoredMedia } from './StorageService';
 import { AIAnalysisService } from './AIAnalysisService';
 import { DevelopmentScoringService } from './DevelopmentScoringService';
+import { ReportService } from './ReportService';
 import { AppError } from '../utils/AppError';
 
 export type CreateObservationInput = {
@@ -56,6 +58,32 @@ type MediaProcessingJob = {
   stageScore?: number;
 };
 
+const GENERIC_PROCESSING_TEXT = 'Observation received. AI processing is in progress.';
+
+const GENERIC_PROCESSING_DISPLAY = {
+  title: 'Observation Processing',
+  description: 'We are preparing this observation for the development record.',
+  progress: 0,
+  icon: 'sparkles'
+};
+
+const GENERIC_FAILED_TEXT = 'AI processing failed. The original observation was saved and can be reviewed.';
+
+const aiErrorMessage = (error: unknown) => {
+  if (!(error instanceof Error)) return 'Unknown AI processing error';
+  if (error.message.includes('OPENAI_API_KEY')) return error.message;
+  if (error.name === 'AuthenticationError' || /api key|auth|unauthorized|invalid/i.test(error.message)) {
+    return 'OpenAI API key is invalid or unauthorized for this backend.';
+  }
+  if (error.name === 'APIConnectionTimeoutError' || /timeout/i.test(error.message)) {
+    return 'OpenAI request timed out before processing completed.';
+  }
+  if (error.name === 'RateLimitError' || /rate limit|quota|billing/i.test(error.message)) {
+    return 'OpenAI quota, billing, or rate limit prevented processing.';
+  }
+  return error.message;
+};
+
 export class ObservationService {
   static isMilestoneStage(stage?: DevelopmentStage) {
     return stage === 'confident';
@@ -96,8 +124,16 @@ export class ObservationService {
 
   private static queueMediaProcessing(job: MediaProcessingJob) {
     setImmediate(() => {
-      void this.processMediaObservation(job).catch(() => {});
+      void this.processMediaObservation(job).catch((error) => {
+        console.error(`[ObservationService] Background AI processing failed for observation ${job.observationId}:`, error);
+      });
     });
+  }
+
+  private static async refreshDevelopmentOutputs(childId: string) {
+    await DevelopmentScoringService.refreshChildDevelopmentSnapshot(childId);
+    await Report.deleteMany({ childId, type: 'development' });
+    void ReportService.developmentReport(childId, {}, true).catch(() => {});
   }
 
   private static async processMediaObservation(job: MediaProcessingJob) {
@@ -112,23 +148,25 @@ export class ObservationService {
         }
       );
 
-      const mediaText = await AIAnalysisService.generateObservationTextFromStoredMedia(job.media);
+      const mediaText = job.media.length ? await AIAnalysisService.generateObservationTextFromStoredMedia(job.media, { throwOnError: true }) : null;
       const text =
         (await AIAnalysisService.generateObservationText({
           providedText: job.providedText,
-          mediaText: mediaText ?? this.mediaFallbackText(job.media),
+          mediaText: mediaText ?? (job.media.length ? this.mediaFallbackText(job.media) : undefined),
           domain: job.domainName,
           indicatorTitle: job.indicatorTitle,
           stage: job.stage,
           stageScore: job.stageScore
-        })) ?? this.mediaFallbackText(job.media);
+        }, { throwOnError: true })) ??
+        job.providedText?.trim() ??
+        (job.media.length ? this.mediaFallbackText(job.media) : GENERIC_PROCESSING_TEXT);
       const display = await AIAnalysisService.generateObservationDisplay({
         text,
         domain: job.domainName,
         indicatorTitle: job.indicatorTitle,
         stage: job.stage,
         stageScore: job.stageScore
-      });
+      }, { throwOnError: true });
 
       await Observation.updateOne(
         { _id: job.observationId },
@@ -147,15 +185,21 @@ export class ObservationService {
         }
       );
 
-      void DevelopmentScoringService.refreshChildDevelopmentSnapshot(job.childId).catch(() => {});
+      void this.refreshDevelopmentOutputs(job.childId).catch(() => {});
     } catch (error) {
+      const message = aiErrorMessage(error);
       await Observation.updateOne(
         { _id: job.observationId },
         {
           $set: {
+            text: GENERIC_FAILED_TEXT,
+            title: 'AI Processing Failed',
+            description: message,
+            progress: 0,
+            icon: 'alert-circle',
             'aiMetadata.observationProcessing.status': 'failed',
             'aiMetadata.observationProcessing.failedAt': new Date(),
-            'aiMetadata.observationProcessing.error': error instanceof Error ? error.message : 'Unknown media processing error'
+            'aiMetadata.observationProcessing.error': message
           }
         }
       );
@@ -203,33 +247,17 @@ export class ObservationService {
 
     const providedText = input.text?.trim();
     const stageScore = input.stage ? DEVELOPMENT_STAGE_SCORE[input.stage] : undefined;
-    const shouldProcessMediaInBackground = !isDraft && media.length > 0;
+    const shouldProcessInBackground = !isDraft && (media.length > 0 || Boolean(providedText));
     const fallbackMediaText = media.length ? this.mediaFallbackText(media) : undefined;
     const generatedText =
       isDraft
         ? providedText || fallbackMediaText
-        : shouldProcessMediaInBackground
-          ? providedText || fallbackMediaText
-          : await AIAnalysisService.generateObservationText({
-              providedText,
-              domain: domain?.name,
-              indicatorTitle: indicator?.title,
-              stage: input.stage,
-              stageScore,
-              type: input.type
-            });
+        : shouldProcessInBackground
+          ? GENERIC_PROCESSING_TEXT
+          : undefined;
     const text = generatedText ?? undefined;
 
-    const displayInput = {
-      text,
-      domain: domain?.name,
-      indicatorTitle: indicator?.title,
-      stage: input.stage,
-      stageScore
-    };
-    const display = isDraft
-      ? null
-      : await AIAnalysisService.generateObservationDisplay(displayInput);
+    const display = isDraft ? null : GENERIC_PROCESSING_DISPLAY;
 
     const isMilestone = !isDraft && this.isMilestoneStage(input.stage);
     const observation = await Observation.create({
@@ -253,8 +281,13 @@ export class ObservationService {
       occurredAt: input.occurredAt ?? new Date(),
       isMilestone,
       status,
-      aiMetadata: !isDraft && media.length
+      aiMetadata: shouldProcessInBackground
         ? {
+            originalInput: {
+              text: providedText,
+              media,
+              savedAt: new Date()
+            },
             observationProcessing: {
               status: 'queued',
               queuedAt: new Date(),
@@ -293,7 +326,7 @@ export class ObservationService {
       });
     }
 
-    if (shouldProcessMediaInBackground) {
+    if (shouldProcessInBackground) {
       this.queueMediaProcessing({
         observationId: observation._id.toString(),
         childId: input.childId,
@@ -304,10 +337,6 @@ export class ObservationService {
         stage: input.stage,
         stageScore
       });
-    }
-
-    if (!isDraft) {
-      void DevelopmentScoringService.refreshChildDevelopmentSnapshot(input.childId).catch(() => {});
     }
 
     return observation;
@@ -343,32 +372,16 @@ export class ObservationService {
       if (!domainId) throw new AppError('Domain is required', 400);
     }
 
-    const shouldProcessMediaInBackground = status === 'active' && media.length > 0;
+    const shouldProcessInBackground = status === 'active' && (media.length > 0 || Boolean(text));
     const generatedObservationText =
       status === 'active'
-        ? shouldProcessMediaInBackground
-          ? text || this.mediaFallbackText(media as StoredMedia[])
-          : await AIAnalysisService.generateObservationText({
-              providedText: text,
-              domain: domain?.name,
-              indicatorTitle: indicator?.title,
-              stage,
-              stageScore,
-              type: input.type ?? observation.type
-            })
+        ? shouldProcessInBackground
+          ? GENERIC_PROCESSING_TEXT
+          : undefined
         : text;
     const observationText = generatedObservationText ?? undefined;
 
-    const displayInput = {
-      text: observationText,
-      domain: domain?.name,
-      indicatorTitle: indicator?.title,
-      stage,
-      stageScore
-    };
-    const display = status === 'active'
-      ? await AIAnalysisService.generateObservationDisplay(displayInput)
-      : undefined;
+    const display = status === 'active' ? GENERIC_PROCESSING_DISPLAY : undefined;
     const isMilestone = status === 'active' && this.isMilestoneStage(stage);
 
     observation.set({
@@ -382,9 +395,14 @@ export class ObservationService {
       ...(display ? { title: display.title, description: display.description, progress: display.progress, icon: display.icon } : {}),
       status,
       isMilestone,
-      ...(shouldProcessMediaInBackground
+      ...(shouldProcessInBackground
         ? {
             aiMetadata: {
+              originalInput: {
+                text,
+                media,
+                savedAt: new Date()
+              },
               observationProcessing: {
                 status: 'queued',
                 queuedAt: new Date(),
@@ -424,7 +442,7 @@ export class ObservationService {
         });
       }
 
-      if (shouldProcessMediaInBackground) {
+      if (shouldProcessInBackground) {
         this.queueMediaProcessing({
           observationId: observation._id.toString(),
           childId: observation.childId.toString(),
@@ -437,7 +455,6 @@ export class ObservationService {
         });
       }
 
-      void DevelopmentScoringService.refreshChildDevelopmentSnapshot(observation.childId.toString()).catch(() => {});
     }
 
     return observation;

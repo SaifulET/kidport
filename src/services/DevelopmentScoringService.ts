@@ -12,6 +12,11 @@ import { AppError } from '../utils/AppError';
 
 export type ScoreInput = { stage?: DevelopmentStage | null; stageScore?: number | null };
 
+const processedObservationFilter = {
+  status: 'active',
+  'aiMetadata.observationProcessing.status': { $nin: ['queued', 'processing'] }
+};
+
 export class DevelopmentScoringService {
   static scoreForStage(stage: DevelopmentStage) {
     return DEVELOPMENT_STAGE_SCORE[stage];
@@ -51,7 +56,7 @@ export class DevelopmentScoringService {
         const observations = await Observation.find({
           childId: new Types.ObjectId(childId),
           domainId: domain._id,
-          status: 'active',
+          ...processedObservationFilter,
           ...(Object.keys(dateFilter).length ? { occurredAt: dateFilter } : {})
         })
           .select('stage stageScore text title occurredAt')
@@ -109,7 +114,7 @@ export class DevelopmentScoringService {
     const [ageBands, indicators, observations] = await Promise.all([
       AgeBand.find({ status: 'active' }).sort({ minMonths: 1 }),
       DevelopmentIndicator.find({ status: 'active' }).select('domainId ageBandId title'),
-      Observation.find({ childId: new Types.ObjectId(childId), status: 'active' })
+      Observation.find({ childId: new Types.ObjectId(childId), ...processedObservationFilter })
         .select('domainId indicatorId stage stageScore text title occurredAt')
         .sort({ occurredAt: -1 })
         .limit(100)
@@ -212,7 +217,7 @@ export class DevelopmentScoringService {
     const [domains, indicators, observations] = await Promise.all([
       DevelopmentDomain.find({ status: 'active' }).select('name'),
       ageBand ? DevelopmentIndicator.find({ ageBandId: ageBand._id, status: 'active' }).select('title domainId') : [],
-      Observation.find({ childId: new Types.ObjectId(childId), status: 'active' })
+      Observation.find({ childId: new Types.ObjectId(childId), ...processedObservationFilter })
         .select('domainId indicatorId stage stageScore text title isMilestone occurredAt')
         .sort({ occurredAt: -1 })
     ]);

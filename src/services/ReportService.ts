@@ -363,6 +363,7 @@ export class ReportService {
     const filter = {
       childId,
       status: 'active',
+      'aiMetadata.observationProcessing.status': { $nin: ['queued', 'processing'] },
       ...(range.startDate || range.endDate
         ? { occurredAt: { ...(range.startDate ? { $gte: range.startDate } : {}), ...(range.endDate ? { $lte: range.endDate } : {}) } }
         : {})

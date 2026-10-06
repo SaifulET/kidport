@@ -143,6 +143,10 @@ type ObservationTextInput = {
   type?: string;
 };
 
+type AIRequestOptions = {
+  throwOnError?: boolean;
+};
+
 export class AIAnalysisService {
   private static developmentalAgeParts(totalMonths: number) {
     const years = Math.floor(totalMonths / 12);
@@ -176,10 +180,13 @@ export class AIAnalysisService {
   }
 
   private static logAIError(context: string, error: unknown) {
-    if (error instanceof Error && error.name === 'APIConnectionTimeoutError') {
-            return;
-    }
-      }
+    const message = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+    console.error(`[AIAnalysisService] ${context}: ${message}`);
+  }
+
+  private static unavailableError() {
+    return new Error('OPENAI_API_KEY is not configured for backend AI processing.');
+  }
 
   static disclaimer =
     'This report is generated from caregiver-submitted observations and AI-assisted analysis. It is not a clinical diagnosis and should not replace professional pediatric evaluation.';
@@ -242,9 +249,13 @@ export class AIAnalysisService {
     }
   }
 
-  static async generateObservationTextFromMedia(files: MediaAnalysisFile[]) {
+  static async generateObservationTextFromMedia(files: MediaAnalysisFile[], options: AIRequestOptions = {}) {
     const client = this.client();
-    if (!client || files.length === 0) return null;
+    if (!client) {
+      if (options.throwOnError) throw this.unavailableError();
+      return null;
+    }
+    if (files.length === 0) return null;
 
     const generated = await Promise.all(
       files.map(async (file) => {
@@ -254,6 +265,7 @@ export class AIAnalysisService {
           return null;
         } catch (error) {
           this.logAIError('Failed to generate observation text from media', error);
+          if (options.throwOnError) throw error;
           return null;
         }
       })
@@ -262,8 +274,12 @@ export class AIAnalysisService {
     return generated.filter(Boolean).join('\n\n') || null;
   }
 
-  static async generateObservationTextFromStoredMedia(media: StoredMedia[]) {
-    if (!env.OPENAI_API_KEY || media.length === 0) return null;
+  static async generateObservationTextFromStoredMedia(media: StoredMedia[], options: AIRequestOptions = {}) {
+    if (!env.OPENAI_API_KEY) {
+      if (options.throwOnError) throw this.unavailableError();
+      return null;
+    }
+    if (media.length === 0) return null;
 
     const files = await Promise.all(
       media.map(async (item) => ({
@@ -273,7 +289,7 @@ export class AIAnalysisService {
       }))
     );
 
-    return this.generateObservationTextFromMedia(files);
+    return this.generateObservationTextFromMedia(files, options);
   }
 
   static fallbackObservationText(input: ObservationTextInput) {
@@ -281,10 +297,14 @@ export class AIAnalysisService {
     return parts.join(' ').trim() || null;
   }
 
-  static async generateObservationText(input: ObservationTextInput) {
+  static async generateObservationText(input: ObservationTextInput, options: AIRequestOptions = {}) {
     const fallback = this.fallbackObservationText(input);
     const client = this.client();
-    if (!client || !fallback) return fallback;
+    if (!client) {
+      if (options.throwOnError) throw this.unavailableError();
+      return fallback;
+    }
+    if (!fallback) return fallback;
 
     try {
       const response = await client.chat.completions.create({
@@ -315,6 +335,7 @@ export class AIAnalysisService {
       return observationTextSchema.parse(JSON.parse(response.choices[0]?.message.content ?? '{}')).observation.trim();
     } catch (error) {
       this.logAIError('Failed to generate observation text', error);
+      if (options.throwOnError) throw error;
       return fallback;
     }
   }
@@ -327,10 +348,13 @@ export class AIAnalysisService {
     return { title, description, progress, icon: this.fallbackObservationIcon(input) };
   }
 
-  static async generateObservationDisplay(input: { text?: string; domain?: string; indicatorTitle?: string; stage?: string; stageScore?: number }) {
+  static async generateObservationDisplay(input: { text?: string; domain?: string; indicatorTitle?: string; stage?: string; stageScore?: number }, options: AIRequestOptions = {}) {
     const fallback = this.fallbackObservationDisplay(input);
     const client = this.client();
-    if (!client) return fallback;
+    if (!client) {
+      if (options.throwOnError) throw this.unavailableError();
+      return fallback;
+    }
 
     try {
       const response = await client.chat.completions.create({
@@ -359,6 +383,7 @@ export class AIAnalysisService {
       return parsed;
     } catch (error) {
       this.logAIError('Failed to generate observation display fields', error);
+      if (options.throwOnError) throw error;
       return fallback;
     }
   }

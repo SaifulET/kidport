@@ -247,7 +247,7 @@ observationsRouter.patch('/observations/:observationId', validate(updateSchema),
 
 observationsRouter.get('/observations/:observationId', asyncHandler(async (req, res) => {
   const observation = await Observation.findById(req.params.observationId);
-  if (!observation) throw new AppError('Observation not found', 404);
+  if (!observation || observation.status === 'deleted') throw new AppError('Observation not found', 404);
   if (observation.status === 'draft' && observation.authorId.toString() !== req.user!._id.toString()) {
     throw new AppError('Only the draft author can view this observation', 403);
   }
@@ -259,7 +259,7 @@ observationsRouter.get('/observations/:observationId', asyncHandler(async (req, 
 observationsRouter.get('/observations/:observationId/details', asyncHandler(async (req, res) => {
   const { page, limit, skip } = paginationFromQuery(req.query);
   const observation = await Observation.findById(req.params.observationId);
-  if (!observation) throw new AppError('Observation not found', 404);
+  if (!observation || observation.status === 'deleted') throw new AppError('Observation not found', 404);
   if (observation.status === 'draft' && observation.authorId.toString() !== req.user!._id.toString()) {
     throw new AppError('Only the draft author can view this observation', 403);
   }
@@ -287,4 +287,12 @@ observationsRouter.get('/observations/:observationId/details', asyncHandler(asyn
     },
     pagination: { page, limit, total: totalComments, totalPages: Math.ceil(totalComments / limit) }
   });
+}));
+
+observationsRouter.delete('/observations/:observationId', asyncHandler(async (req, res) => {
+  const observation = await ObservationService.delete({
+    observationId: req.params.observationId,
+    userId: req.user!._id.toString()
+  });
+  ok(res, 'Observation deleted successfully', { id: observation._id, status: observation.status });
 }));

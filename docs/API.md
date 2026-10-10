@@ -2612,9 +2612,9 @@ Possible errors: `400`, `403`, `404`, `503`
 
 ### PATCH `/observations/:observationId`
 
-Auth: required, draft author required
+Auth: required, observation author required
 
-Edits a draft observation. To publish a draft, send `status: "active"` with the fields required for an active observation.
+Updates an existing observation. Draft observations can be edited and published by sending `status: "active"` with the fields required for an active observation. Active observations can be updated by their author, but cannot be changed back to draft.
 
 Request body:
 
@@ -2630,6 +2630,27 @@ Request body:
 Editable fields: `type`, `observation`, `text`, `keyword`, `stage`, `domain`, `domainId`, `indicatorId`, `mood`, `occurredAt`, `status`.
 
 Possible errors: `400`, `403`, `404`
+
+### DELETE `/observations/:observationId`
+
+Auth: required, observation author required
+
+Soft-deletes an observation by setting `status` to `"deleted"`.
+
+Response:
+
+```json
+{
+  "success": true,
+  "message": "Observation deleted successfully",
+  "data": {
+    "id": "66f...",
+    "status": "deleted"
+  }
+}
+```
+
+Possible errors: `403`, `404`
 
 ### POST `/children/:childId/observations/text`
 

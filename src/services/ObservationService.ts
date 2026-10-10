@@ -47,6 +47,11 @@ export type UpdateDraftObservationInput = {
   status?: 'active' | 'draft';
 };
 
+export type DeleteObservationInput = {
+  observationId: string;
+  userId: string;
+};
+
 type MediaProcessingJob = {
   observationId: string;
   childId: string;
@@ -345,10 +350,12 @@ export class ObservationService {
   static async updateDraft(input: UpdateDraftObservationInput) {
     const observation = await Observation.findById(input.observationId);
     if (!observation) throw new AppError('Observation not found', 404);
-    if (observation.authorId.toString() !== input.userId) throw new AppError('Only the draft author can edit this observation', 403);
-    if (observation.status !== 'draft') throw new AppError('Only draft observations can be edited', 400);
+    if (observation.status === 'deleted') throw new AppError('Observation not found', 404);
+    if (observation.authorId.toString() !== input.userId) throw new AppError('Only the observation author can edit this observation', 403);
 
-    const status = input.status ?? 'draft';
+    const currentStatus = observation.status === 'draft' ? 'draft' : 'active';
+    const status = input.status ?? currentStatus;
+    if (currentStatus === 'active' && status === 'draft') throw new AppError('Active observations cannot be changed back to draft', 400);
     const domainId = input.domainId !== undefined ? await this.resolveDomainId(input.domainId) : observation.domainId?.toString();
     const indicatorId = input.indicatorId !== undefined ? input.indicatorId : observation.indicatorId?.toString();
     await this.validateDomainIndicator(domainId, indicatorId);
@@ -374,28 +381,28 @@ export class ObservationService {
 
     const shouldProcessInBackground = status === 'active' && (media.length > 0 || Boolean(text));
     const generatedObservationText =
-      status === 'active'
+      currentStatus === 'draft' && status === 'active'
         ? shouldProcessInBackground
           ? GENERIC_PROCESSING_TEXT
           : undefined
         : text;
-    const observationText = generatedObservationText ?? undefined;
+    const observationText = generatedObservationText ?? text ?? undefined;
 
-    const display = status === 'active' ? GENERIC_PROCESSING_DISPLAY : undefined;
+    const display = currentStatus === 'draft' && status === 'active' ? GENERIC_PROCESSING_DISPLAY : undefined;
     const isMilestone = status === 'active' && this.isMilestoneStage(stage);
 
     observation.set({
       ...(input.type ? { type: input.type } : {}),
-      ...(input.text !== undefined || status === 'active' ? { text: observationText } : {}),
+      ...(input.text !== undefined || (currentStatus === 'draft' && status === 'active') ? { text: observationText } : {}),
       ...(input.domainId !== undefined ? { domainId } : {}),
       ...(input.indicatorId !== undefined ? { indicatorId } : {}),
-      ...(input.stage !== undefined ? { stage, stageScore } : {}),
+      ...(input.stage !== undefined || status === 'active' ? { stage, stageScore } : {}),
       ...(input.mood !== undefined ? { mood: input.mood } : {}),
       ...(input.occurredAt !== undefined ? { occurredAt: input.occurredAt } : {}),
       ...(display ? { title: display.title, description: display.description, progress: display.progress, icon: display.icon } : {}),
       status,
       isMilestone,
-      ...(shouldProcessInBackground
+      ...(currentStatus === 'draft' && shouldProcessInBackground
         ? {
             aiMetadata: {
               originalInput: {
@@ -414,7 +421,7 @@ export class ObservationService {
     });
     await observation.save();
 
-    if (status === 'active') {
+    if (currentStatus === 'draft' && status === 'active') {
       await NotificationService.createObservationNotifications({
         childId: observation.childId.toString(),
         observationId: observation._id.toString(),
@@ -456,6 +463,22 @@ export class ObservationService {
       }
 
     }
+
+    if (status === 'active') {
+      void this.refreshDevelopmentOutputs(observation.childId.toString()).catch(() => {});
+    }
+
+    return observation;
+  }
+
+  static async delete(input: DeleteObservationInput) {
+    const observation = await Observation.findById(input.observationId);
+    if (!observation || observation.status === 'deleted') throw new AppError('Observation not found', 404);
+    if (observation.authorId.toString() !== input.userId) throw new AppError('Only the observation author can delete this observation', 403);
+
+    observation.status = 'deleted';
+    await observation.save();
+    void this.refreshDevelopmentOutputs(observation.childId.toString()).catch(() => {});
 
     return observation;
   }

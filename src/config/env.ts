@@ -30,7 +30,7 @@ const schema = z.object({
   SMTP_FROM: z.string().default('Kidport <no-reply@kidport.local>'),
   OPENAI_API_KEY: z.string().optional(),
   OPENAI_MODEL: z.string().default('gpt-4o-mini'),
-  OPENAI_REQUEST_TIMEOUT_MS: z.coerce.number().int().positive().default(1500),
+  OPENAI_REQUEST_TIMEOUT_MS: z.coerce.number().int().positive().default(60000),
   FRONTEND_URL: z.string().url().default('http://localhost:3000'),
   MOBILE_DEEP_LINK: z.string().default('kidport://')
 });

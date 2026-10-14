@@ -4,9 +4,9 @@
   "description": "Backend API for a child-development/daycare platform.",
   "main": "dist/server.js",
   "scripts": {
-    "dev": "node api.js && ts-node-dev --respawn --transpile-only src/server.ts",
+    "dev": "ts-node-dev --respawn --transpile-only src/server.ts",
     "dev:memory": "ts-node-dev --respawn --transpile-only src/dev-memory.ts",
-    "build": "node api.js && tsc",
+    "build": "tsc",
     "typecheck": "tsc --noEmit",
     "lint": "tsc --noEmit",
     "test": "vitest run"

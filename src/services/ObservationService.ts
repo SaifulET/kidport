@@ -258,11 +258,23 @@ export class ObservationService {
       isDraft
         ? providedText || fallbackMediaText
         : shouldProcessInBackground
-          ? GENERIC_PROCESSING_TEXT
+          ? media.length > 0
+            ? GENERIC_PROCESSING_TEXT
+            : providedText
           : undefined;
     const text = generatedText ?? undefined;
 
-    const display = isDraft ? null : GENERIC_PROCESSING_DISPLAY;
+    const display = isDraft
+      ? null
+      : media.length > 0
+        ? GENERIC_PROCESSING_DISPLAY
+        : AIAnalysisService.fallbackObservationDisplay({
+            text,
+            domain: domain?.name,
+            indicatorTitle: indicator?.title,
+            stage: input.stage,
+            stageScore
+          });
 
     const isMilestone = !isDraft && this.isMilestoneStage(input.stage);
     const observation = await Observation.create({
@@ -383,12 +395,25 @@ export class ObservationService {
     const generatedObservationText =
       currentStatus === 'draft' && status === 'active'
         ? shouldProcessInBackground
-          ? GENERIC_PROCESSING_TEXT
+          ? media.length > 0
+            ? GENERIC_PROCESSING_TEXT
+            : text
           : undefined
         : text;
     const observationText = generatedObservationText ?? text ?? undefined;
 
-    const display = currentStatus === 'draft' && status === 'active' ? GENERIC_PROCESSING_DISPLAY : undefined;
+    const display =
+      currentStatus === 'draft' && status === 'active'
+        ? media.length > 0
+          ? GENERIC_PROCESSING_DISPLAY
+          : AIAnalysisService.fallbackObservationDisplay({
+              text: observationText,
+              domain: domain?.name,
+              indicatorTitle: indicator?.title,
+              stage,
+              stageScore
+            })
+        : undefined;
     const isMilestone = status === 'active' && this.isMilestoneStage(stage);
 
     observation.set({

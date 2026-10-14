@@ -14,6 +14,7 @@ import { developmentalAgeDisplay } from '../../utils/developmentalAge';
 import { randomToken, hashToken } from '../../utils/crypto';
 import { DEVELOPMENT_STAGE_SCORE } from '../../constants/stages';
 import { AccessibleChildrenService } from '../../services/AccessibleChildrenService';
+import { DailyAiInsightService } from '../../services/DailyAiInsightService';
 import { DevelopmentScoringService } from '../../services/DevelopmentScoringService';
 import { ObservationService } from '../../services/ObservationService';
 import { ReportService } from '../../services/ReportService';
@@ -529,7 +530,11 @@ childrenRouter.delete('/children/:childId', requireChildOwner(), asyncHandler(as
 }));
 
 childrenRouter.get('/children/:childId/development-progress', requireChildAccess(), asyncHandler(async (req, res) => {
-  ok(res, 'Development progress', await DevelopmentScoringService.calculateChildProgress(req.params.childId));
+  const [progress, todayInsight] = await Promise.all([
+    DevelopmentScoringService.calculateChildProgress(req.params.childId),
+    DailyAiInsightService.getTodayInsight(req.params.childId)
+  ]);
+  ok(res, 'Development progress', { ...progress, todayInsight });
 }));
 
 childrenRouter.get('/children/:childId/observation-summary', requireChildAccess(), asyncHandler(async (req, res) => {
@@ -542,8 +547,9 @@ childrenRouter.get('/children/:childId/observations/analytics', requireChildAcce
 
 childrenRouter.get('/children/:childId/dashboard', requireChildAccess(), asyncHandler(async (req, res) => {
   const child = await Child.findById(req.params.childId);
-  const [progress, observationSummary, careCircle, recentActivities] = await Promise.all([
+  const [progress, todayInsight, observationSummary, careCircle, recentActivities] = await Promise.all([
     DevelopmentScoringService.calculateChildProgress(req.params.childId),
+    DailyAiInsightService.getTodayInsight(req.params.childId),
     DevelopmentScoringService.calculateObservationSummary(req.params.childId),
     CareCircleMembership.find({ childId: req.params.childId, status: 'active' }).populate('userId', 'fullName profilePhoto caregiverRole daycareRole'),
     Observation.find({ childId: req.params.childId, status: 'active' })
@@ -555,7 +561,7 @@ childrenRouter.get('/children/:childId/dashboard', requireChildAccess(), asyncHa
   const activityCounts = await SocialResponseService.observationCountMaps(recentActivities.map((item) => item._id));
   ok(res, 'Dashboard', {
     child: child ? childResponse(child) : null,
-    todayInsight: { disclaimer: 'AI insights are guidance only, not a diagnosis.' },
+    todayInsight,
     developmentProgress: progress.domains,
     observationSummary,
     pediatricReport: {

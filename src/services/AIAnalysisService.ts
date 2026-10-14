@@ -67,6 +67,23 @@ const developmentalAgeEstimateSchema = z.object({
     .default([])
 });
 
+const dailyInsightSchema = z.object({
+  title: z.string().min(1).max(80),
+  summary: z.string().min(1).max(240),
+  suggestion: z.string().min(1).max(180),
+  domainHighlights: z
+    .array(
+      z.object({
+        domain: z.string().min(1).max(80),
+        status: z.string().min(1).max(40),
+        keyword: z.string().min(1).max(40)
+      })
+    )
+    .default([])
+    .transform((items) => items.slice(0, 5)),
+  disclaimer: z.string().min(1).max(160)
+});
+
 type DomainKeywordInput = {
   domainId: string;
   name: string;
@@ -126,6 +143,33 @@ type DevelopmentalAgeEstimateInput = {
     occurredAt?: Date | null;
   }>;
 };
+
+type DailyInsightInput = {
+  child: {
+    ageMonths: number;
+  };
+  domainProgress: Array<{
+    name: string;
+    percentage: number | null;
+    stage: string;
+    keyword: string;
+    observationCount: number;
+  }>;
+  observationSummary: {
+    achieved: number;
+    inProgress: number;
+    upcoming: number;
+  };
+  recentObservations: Array<{
+    domain?: string | null;
+    title?: string | null;
+    text?: string | null;
+    stage?: string | null;
+    occurredAt?: Date | null;
+  }>;
+};
+
+export type DailyInsightResult = z.infer<typeof dailyInsightSchema>;
 
 type MediaAnalysisFile = {
   buffer: Buffer;
@@ -190,6 +234,80 @@ export class AIAnalysisService {
 
   static disclaimer =
     'This report is generated from caregiver-submitted observations and AI-assisted analysis. It is not a clinical diagnosis and should not replace professional pediatric evaluation.';
+
+  static dailyInsightDisclaimer = 'AI insights are guidance only, not a diagnosis.';
+
+  static fallbackDailyInsight(input: DailyInsightInput): DailyInsightResult {
+    const observedDomains = input.domainProgress.filter((domain) => domain.observationCount > 0);
+    const strongestDomain =
+      observedDomains
+        .slice()
+        .sort((a, b) => (b.percentage ?? -1) - (a.percentage ?? -1))[0] ?? input.domainProgress[0];
+    const needsSupport = observedDomains.find((domain) => domain.keyword === 'needs-support' || domain.stage === 'emerging' || domain.stage === 'building');
+    const domain = needsSupport ?? strongestDomain;
+    const title = domain ? `${domain.name} insight` : 'Development insight';
+    const summary = domain
+      ? `${domain.name} is currently ${domain.stage.replace(/_/g, ' ')} based on ${domain.observationCount} observation${domain.observationCount === 1 ? '' : 's'}.`
+      : `This child is ${input.child.ageMonths} months old. Add observations to unlock more specific daily guidance.`;
+    const suggestion = needsSupport
+      ? `Offer one short, playful activity today that practices ${needsSupport.name.toLowerCase()}.`
+      : 'Add a fresh observation today so progress guidance stays current.';
+
+    return {
+      title,
+      summary,
+      suggestion,
+      domainHighlights: input.domainProgress.slice(0, 5).map((item) => ({
+        domain: item.name,
+        status: item.stage,
+        keyword: item.keyword
+      })),
+      disclaimer: this.dailyInsightDisclaimer
+    };
+  }
+
+  static async generateDailyInsight(input: DailyInsightInput) {
+    const fallback = this.fallbackDailyInsight(input);
+    const client = this.client();
+    if (!client) return { insight: fallback, status: 'fallback' as const };
+
+    try {
+      const response = await client.chat.completions.create(
+        {
+          model: env.OPENAI_MODEL,
+          response_format: { type: 'json_object' },
+          messages: [
+            {
+              role: 'system',
+              content:
+                'Create one concise daily child-development insight for a caregiver. Return valid JSON only with title, summary, suggestion, domainHighlights, and disclaimer. Use child age, observation summary, domain status, and recent observations. Do not diagnose, mention delays, make medical claims, or replace professional evaluation. Keep the insight practical and supportive.'
+            },
+            {
+              role: 'user',
+              content: JSON.stringify({
+                requiredJsonShape: {
+                  title: 'string, max 80 chars',
+                  summary: 'string, max 240 chars',
+                  suggestion: 'string, max 180 chars',
+                  domainHighlights: 'array, max 5 items, each {domain, status, keyword}',
+                  disclaimer: this.dailyInsightDisclaimer
+                },
+                input,
+                fallback
+              })
+            }
+          ]
+        },
+        this.requestOptions()
+      );
+
+      const parsed = dailyInsightSchema.parse(JSON.parse(response.choices[0]?.message.content ?? '{}'));
+      return { insight: { ...parsed, disclaimer: this.dailyInsightDisclaimer }, status: 'generated' as const };
+    } catch (error) {
+      this.logAIError('Failed to generate daily insight', error);
+      return { insight: fallback, status: 'fallback' as const };
+    }
+  }
 
   private static fallbackReportNarrative(reason: string) {
     return {

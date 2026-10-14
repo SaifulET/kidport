@@ -2,19 +2,23 @@ import { createServer } from 'http';
 import app from './app';
 import { connectDatabase } from './config/db';
 import { env } from './config/env';
+import { startDailyAiInsightScheduler } from './services/DailyAiInsightScheduler';
 import { initializeSocket } from './socket';
 
 export const start = async () => {
   await connectDatabase();
   const server = createServer(app);
   initializeSocket(server);
+  startDailyAiInsightScheduler();
   server.listen(env.PORT, () => {
-      });
+    console.log(`Kidport API listening on port ${env.PORT}`);
+  });
 };
 
 if (require.main === module) {
   start().catch((error) => {
-        process.exit(1);
+    console.error('Failed to start Kidport API:', error);
+    process.exit(1);
   });
 }
 

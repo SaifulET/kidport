@@ -2851,12 +2851,29 @@ Response:
         "observationCount": 0
       }
     ],
+    "todayInsight": {
+      "title": "Language progress is improving",
+      "summary": "Recent observations show steady communication and participation.",
+      "suggestion": "Try asking open-ended questions during play today.",
+      "domainHighlights": [
+        {
+          "domain": "Language & Literacy",
+          "status": "steady",
+          "keyword": "improving"
+        }
+      ],
+      "generatedAt": "2026-08-10T00:00:00.000Z",
+      "localDate": "2026-08-10",
+      "disclaimer": "AI insights are guidance only, not a diagnosis.",
+      "status": "generated"
+    },
     "lastCalculatedAt": "2026-08-10T00:00:00.000Z"
   }
 }
 ```
 
 Domain `keyword` is generated from that child's observations in the domain. Possible values: `improving`, `stable`, `needs-support`, `not-enough-data`.
+`todayInsight` is stored once per child and shared with every authorized user who can access that child. It refreshes automatically once per day.
 
 ### GET `/children/:childId/observation-summary`
 

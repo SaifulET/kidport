@@ -15,6 +15,8 @@ const durationToMs = (duration: string) => {
 };
 
 export class TokenService {
+  static REFRESH_REUSE_WINDOW_MS = 60 * 1000;
+
   static signAccessToken(userId: Types.ObjectId | string) {
     return jwt.sign({ sub: userId.toString(), type: 'access' }, env.JWT_ACCESS_SECRET, {
       expiresIn: env.JWT_ACCESS_EXPIRES_IN as jwt.SignOptions['expiresIn']
@@ -29,22 +31,38 @@ export class TokenService {
     return token;
   }
 
-  static async rotateRefreshToken(token: string, meta: { ip?: string; userAgent?: string }) {
-    const existing = await RefreshToken.findOne({ tokenHash: hashToken(token), revokedAt: { $exists: false } });
-    if (!existing || existing.expiresAt < new Date()) return null;
+  private static async issueRotatedToken(
+    userId: Types.ObjectId | string,
+    meta: { ip?: string; userAgent?: string }
+  ) {
     const nextToken = randomToken();
     const nextHash = hashToken(nextToken);
-    existing.revokedAt = new Date();
-    existing.replacedByTokenHash = nextHash;
-    await existing.save();
     await RefreshToken.create({
-      userId: existing.userId,
+      userId,
       tokenHash: nextHash,
       expiresAt: new Date(Date.now() + durationToMs(env.JWT_REFRESH_EXPIRES_IN)),
       ip: meta.ip,
       userAgent: meta.userAgent
     });
-    return { userId: existing.userId.toString(), refreshToken: nextToken };
+    return { userId: userId.toString(), refreshToken: nextToken, nextHash };
+  }
+
+  static async rotateRefreshToken(token: string, meta: { ip?: string; userAgent?: string }) {
+    const existing = await RefreshToken.findOne({ tokenHash: hashToken(token) });
+    if (!existing || existing.expiresAt < new Date()) return null;
+
+    if (existing.revokedAt) {
+      const revokedAgo = Date.now() - existing.revokedAt.getTime();
+      if (revokedAgo > this.REFRESH_REUSE_WINDOW_MS) return null;
+      const reused = await this.issueRotatedToken(existing.userId, meta);
+      return { userId: reused.userId, refreshToken: reused.refreshToken };
+    }
+
+    const rotated = await this.issueRotatedToken(existing.userId, meta);
+    existing.revokedAt = new Date();
+    existing.replacedByTokenHash = rotated.nextHash;
+    await existing.save();
+    return { userId: rotated.userId, refreshToken: rotated.refreshToken };
   }
 
   static async revoke(token: string) {

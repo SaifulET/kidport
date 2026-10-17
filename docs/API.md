@@ -329,6 +329,8 @@ Response:
 }
 ```
 
+A refresh token is rotated on each successful use. The previous token remains reusable for 60 seconds so overlapping tabs or parallel 401 retries do not force a logout.
+
 Possible errors: `400`, `401`
 
 ### POST `/auth/logout`

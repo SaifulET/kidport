@@ -1,9 +1,12 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { requireAuth } from '../../middlewares/auth';
+import { requirePlatformAdmin } from '../../middlewares/authorization';
 import { validate } from '../../middlewares/validate';
 import { asyncHandler } from '../../utils/asyncHandler';
+import { AppError } from '../../utils/AppError';
 import { ok } from '../../utils/apiResponse';
+import { EmailService } from '../../services/EmailService';
 import { LegalAcceptance } from './legal-acceptance.model';
 import { LegalDocument } from './legal-document.model';
 
@@ -71,8 +74,28 @@ legalRouter.post(
 );
 
 legalRouter.post(
+  '/contact',
+  validate(
+    z.object({
+      body: z.object({
+        name: z.string().trim().min(1).max(80),
+        email: z.string().email(),
+        subject: z.string().trim().min(1).max(120),
+        message: z.string().trim().min(10).max(2000)
+      })
+    })
+  ),
+  asyncHandler(async (req, res) => {
+    const result = await EmailService.contactMessage(req.body);
+    if (result.skipped) throw new AppError('Email delivery is not configured', 503);
+    ok(res, 'Message sent');
+  })
+);
+
+legalRouter.post(
   '/:key',
   requireAuth,
+  requirePlatformAdmin,
   validate(createLegalDocumentSchema),
   asyncHandler(async (req, res) => {
     const key = req.params.key as keyof typeof fallback;

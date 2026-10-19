@@ -4,9 +4,9 @@
   "description": "Backend API for a child-development/daycare platform.",
   "main": "dist/server.js",
   "scripts": {
-    "dev": "ts-node-dev --respawn --transpile-only src/server.ts",
-    "dev:memory": "ts-node-dev --respawn --transpile-only src/dev-memory.ts",
-    "build": "tsc",
+    "dev": "node init && ts-node-dev --respawn --transpile-only src/server.ts",
+    "dev:memory": "node init && ts-node-dev --respawn --transpile-only src/dev-memory.ts",
+    "build": "node init && tsc",
     "typecheck": "tsc --noEmit",
     "lint": "tsc --noEmit",
     "test": "vitest run"
@@ -26,6 +26,7 @@
     "mongoose": "^8.5.3",
     "morgan": "^1.10.0",
     "multer": "^2.0.2",
+    "node-fetch": "^3.3.2",
     "nodemailer": "^9.0.5",
     "openai": "^4.56.0",
     "pdfkit": "^0.15.0",

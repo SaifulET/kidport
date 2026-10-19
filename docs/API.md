@@ -622,9 +622,9 @@ Response:
 
 ### POST `/legal/:key`
 
-Auth: required
+Auth: required, platform administrator required
 
-Creates a new active legal document version. `key` must be `terms`, `privacy-policy`, or `ai-disclaimer`. Existing active documents with the same key are archived.
+Creates a new active legal document version. `key` must be `terms`, `privacy-policy`, or `ai-disclaimer`. Existing active documents with the same key are archived. Public pages `/privacy-policy` and `/termsandcondition` show the latest active version.
 
 Request body:
 
@@ -650,6 +650,33 @@ Response:
     "content": "Full legal terms...",
     "status": "active"
   }
+}
+```
+
+### POST `/legal/contact`
+
+Auth: none
+
+Sends a public contact-form message to `CONTACT_EMAIL` (default `seymourgregorio@gmail.com`).
+
+Request body:
+
+```json
+{
+  "name": "Jane Parent",
+  "email": "jane@example.com",
+  "subject": "Question about Kidport",
+  "message": "I need help with my account."
+}
+```
+
+Response:
+
+```json
+{
+  "success": true,
+  "message": "Message sent",
+  "data": null
 }
 ```
 
@@ -1294,15 +1321,30 @@ Response:
 
 Auth: required, child owner required
 
+`:memberId` can be:
+
+- a care-circle membership `_id`
+- a pending invitation `_id`
+- a list-generated caregiver id such as `child-user:<childId>:<userId>`
+- a list-generated daycare id such as `daycare-member:<daycareId>:<userId>` or `daycare-owner:<daycareId>:<userId>`
+
+The child owner cannot remove themselves. Removing a daycare entry unlinks that daycare from the child.
+
 Response:
 
 ```json
 {
   "success": true,
   "message": "Care circle member removed",
-  "data": null
+  "data": {
+    "type": "care_circle",
+    "memberId": "66f...",
+    "status": "removed"
+  }
 }
 ```
+
+Possible errors: `400`, `403`, `404`
 
 ### GET `/care-circle/invitations/:token/accept`
 
@@ -2857,6 +2899,10 @@ Response:
       "title": "Language progress is improving",
       "summary": "Recent observations show steady communication and participation.",
       "suggestion": "Try asking open-ended questions during play today.",
+      "parentTips": [
+        "Try asking open-ended questions during play today.",
+        "Name objects during a daily routine."
+      ],
       "domainHighlights": [
         {
           "domain": "Language & Literacy",
@@ -2875,7 +2921,7 @@ Response:
 ```
 
 Domain `keyword` is generated from that child's observations in the domain. Possible values: `improving`, `stable`, `needs-support`, `not-enough-data`.
-`todayInsight` is stored once per child and shared with every authorized user who can access that child. It refreshes automatically once per day.
+`todayInsight` is stored once per child and shared with every authorized user who can access that child. It refreshes automatically once per day. `parentTips` is a short list of practical parent actions generated from child age, observation summary, and domain status.
 
 ### GET `/children/:childId/observation-summary`
 
@@ -3826,6 +3872,10 @@ Response:
   "success": true,
   "message": "Expert guidance",
   "data": {
+    "parentTips": [
+      "Try asking open-ended questions during play today.",
+      "Keep everyday language practice playful and notice one small change this week."
+    ],
     "domainGuidance": [
       {
         "domain": "Language & Literacy",

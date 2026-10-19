@@ -16,6 +16,7 @@ const dailyAiInsightSchema = new Schema(
     title: { type: String, required: true },
     summary: { type: String, required: true },
     suggestion: { type: String, required: true },
+    parentTips: { type: [String], default: [] },
     domainHighlights: [domainHighlightSchema],
     disclaimer: { type: String, required: true },
     generatedAt: { type: Date, required: true, default: Date.now },

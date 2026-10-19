@@ -9,6 +9,7 @@ import { ok, paginated } from '../../utils/apiResponse';
 import { paginateArray, paginationFromQuery } from '../../utils/pagination';
 import { randomToken, hashToken } from '../../utils/crypto';
 import { EmailService } from '../../services/EmailService';
+import { CareCircleService } from '../../services/CareCircleService';
 import { InvitationWorkflowService } from '../../services/ObservationService';
 import { NotificationService } from '../../services/NotificationService';
 import { User } from '../users/user.model';
@@ -167,6 +168,31 @@ const careCirclePayload = async (childId: string) => {
     }
   }
 
+  const pendingInvitations = await Invitation.find({
+    childId,
+    status: 'pending',
+    expiresAt: { $gt: new Date() },
+    type: { $in: ['care_circle', 'daycare_child_assignment'] }
+  }).lean();
+  for (const invitation of pendingInvitations) {
+    addEntry(`invitation:${invitation._id.toString()}`, {
+      _id: invitation._id.toString(),
+      childId,
+      userId: {
+        _id: null,
+        fullName: invitation.email,
+        email: invitation.email,
+        profilePhoto: null
+      },
+      role: invitation.role ?? (invitation.type === 'daycare_child_assignment' ? 'daycare' : 'caregiver'),
+      relationship: invitation.relationship ?? invitation.role ?? 'invited',
+      permissions: defaultPermissions(false),
+      status: 'pending',
+      source: 'invitation',
+      invitationType: invitation.type
+    });
+  }
+
   return Array.from(byKey.values());
 };
 
@@ -233,13 +259,18 @@ careCircleRouter.post(
 );
 
 careCircleRouter.patch('/children/:childId/care-circle/:memberId', requireAuth, requireChildOwner(), asyncHandler(async (req, res) => {
-  const member = await CareCircleMembership.findOneAndUpdate({ _id: req.params.memberId, childId: req.params.childId }, { $set: req.body }, { new: true });
+  const member = await CareCircleMembership.findOneAndUpdate(
+    { _id: req.params.memberId, childId: req.params.childId, status: 'active' },
+    { $set: req.body },
+    { new: true }
+  );
+  if (!member) throw new AppError('Care circle member not found', 404);
   ok(res, 'Care circle member updated', member);
 }));
 
 careCircleRouter.delete('/children/:childId/care-circle/:memberId', requireAuth, requireChildOwner(), asyncHandler(async (req, res) => {
-  await CareCircleMembership.updateOne({ _id: req.params.memberId, childId: req.params.childId }, { $set: { status: 'removed' } });
-  ok(res, 'Care circle member removed');
+  const removed = await CareCircleService.removeMember(req.params.childId, req.params.memberId, req.user!._id.toString());
+  ok(res, 'Care circle member removed', removed);
 }));
 
 const acceptCareCircleInvitation = asyncHandler(async (req, res) => {

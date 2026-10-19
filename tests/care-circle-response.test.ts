@@ -91,4 +91,54 @@ describe('care circle response', () => {
     expect(response.body.pagination.total).toBe(5);
     expect(response.body.data.filter((member: any) => member.relationship === 'daycare')).toHaveLength(2);
   });
+
+  it('lets the child owner remove an invited care-circle member', async () => {
+    const owner = await makeParent('owner@example.com', 'Owner Parent');
+    const invitedCaregiver = await makeParent('invited@example.com', 'Invited Caregiver');
+    const child = await Child.create({
+      fullName: 'A Child',
+      dateOfBirth: new Date('2022-01-01'),
+      createdBy: owner._id,
+      caregivers: [owner._id]
+    });
+    const membership = await CareCircleMembership.create({
+      childId: child._id,
+      userId: invitedCaregiver._id,
+      role: 'nanny',
+      relationship: 'nanny',
+      status: 'active'
+    });
+
+    const removed = await request(app)
+      .delete(`/api/v1/children/${child._id}/care-circle/${membership._id}`)
+      .set('Authorization', `Bearer ${TokenService.signAccessToken(owner._id)}`)
+      .expect(200);
+
+    expect(removed.body.data).toMatchObject({
+      type: 'care_circle',
+      memberId: membership._id.toString(),
+      status: 'removed'
+    });
+    await expect(CareCircleMembership.findById(membership._id)).resolves.toMatchObject({ status: 'removed' });
+  });
+
+  it('rejects removing the child owner and unknown members', async () => {
+    const owner = await makeParent('owner@example.com', 'Owner Parent');
+    const child = await Child.create({
+      fullName: 'A Child',
+      dateOfBirth: new Date('2022-01-01'),
+      createdBy: owner._id,
+      caregivers: [owner._id]
+    });
+
+    await request(app)
+      .delete(`/api/v1/children/${child._id}/care-circle/child-user:${child._id}:${owner._id}`)
+      .set('Authorization', `Bearer ${TokenService.signAccessToken(owner._id)}`)
+      .expect(400);
+
+    await request(app)
+      .delete(`/api/v1/children/${child._id}/care-circle/${new mongoose.Types.ObjectId()}`)
+      .set('Authorization', `Bearer ${TokenService.signAccessToken(owner._id)}`)
+      .expect(404);
+  });
 });

@@ -35,6 +35,7 @@ export class DailyAiInsightService {
     title: string;
     summary: string;
     suggestion: string;
+    parentTips?: string[];
     domainHighlights?: Array<{ domain: string; status: string; keyword: string }>;
     disclaimer: string;
     generatedAt: Date;
@@ -45,6 +46,7 @@ export class DailyAiInsightService {
       title: insight.title,
       summary: insight.summary,
       suggestion: insight.suggestion,
+      parentTips: insight.parentTips?.length ? insight.parentTips : [insight.suggestion].filter(Boolean),
       domainHighlights: insight.domainHighlights ?? [],
       generatedAt: insight.generatedAt,
       localDate: insight.localDate,
@@ -119,6 +121,7 @@ export class DailyAiInsightService {
       title: result.insight.title,
       summary: result.insight.summary,
       suggestion: result.insight.suggestion,
+      parentTips: result.insight.parentTips?.length ? result.insight.parentTips : [result.insight.suggestion],
       domainHighlights: result.insight.domainHighlights,
       disclaimer: result.insight.disclaimer,
       generatedAt: now,

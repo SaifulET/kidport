@@ -71,6 +71,11 @@ const dailyInsightSchema = z.object({
   title: z.string().min(1).max(80),
   summary: z.string().min(1).max(240),
   suggestion: z.string().min(1).max(180),
+  parentTips: z
+    .array(z.string().min(1).max(180))
+    .max(4)
+    .default([])
+    .transform((items) => items.slice(0, 4)),
   domainHighlights: z
     .array(
       z.object({
@@ -252,11 +257,19 @@ export class AIAnalysisService {
     const suggestion = needsSupport
       ? `Offer one short, playful activity today that practices ${needsSupport.name.toLowerCase()}.`
       : 'Add a fresh observation today so progress guidance stays current.';
+    const parentTips = [
+      suggestion,
+      observedDomains.length
+        ? `Notice one ${domain?.name.toLowerCase() ?? 'development'} moment during a regular routine and write it down.`
+        : 'Record one short observation today so parent tips can stay specific.',
+      `This child is about ${input.child.ageMonths} months old — keep activities brief, playful, and easy to repeat.`
+    ].filter(Boolean).slice(0, 4);
 
     return {
       title,
       summary,
       suggestion,
+      parentTips,
       domainHighlights: input.domainProgress.slice(0, 5).map((item) => ({
         domain: item.name,
         status: item.stage,
@@ -280,7 +293,7 @@ export class AIAnalysisService {
             {
               role: 'system',
               content:
-                'Create one concise daily child-development insight for a caregiver. Return valid JSON only with title, summary, suggestion, domainHighlights, and disclaimer. Use child age, observation summary, domain status, and recent observations. Do not diagnose, mention delays, make medical claims, or replace professional evaluation. Keep the insight practical and supportive.'
+                'Create one concise daily child-development insight for a caregiver. Return valid JSON only with title, summary, suggestion, parentTips, domainHighlights, and disclaimer. Use child age, observation summary, domain status, and recent observations. parentTips must be 2-4 short practical parent actions. Do not diagnose, mention delays, make medical claims, or replace professional evaluation. Keep the insight practical and supportive.'
             },
             {
               role: 'user',
@@ -289,6 +302,7 @@ export class AIAnalysisService {
                   title: 'string, max 80 chars',
                   summary: 'string, max 240 chars',
                   suggestion: 'string, max 180 chars',
+                  parentTips: 'array of 2-4 short practical parent actions',
                   domainHighlights: 'array, max 5 items, each {domain, status, keyword}',
                   disclaimer: this.dailyInsightDisclaimer
                 },

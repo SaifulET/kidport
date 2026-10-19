@@ -28,6 +28,7 @@ const schema = z.object({
   SMTP_USER: z.string().optional(),
   SMTP_PASS: z.string().optional(),
   SMTP_FROM: z.string().default('Kidport <no-reply@kidport.local>'),
+  CONTACT_EMAIL: z.string().email().default('seymourgregorio@gmail.com'),
   OPENAI_API_KEY: z.string().optional(),
   OPENAI_MODEL: z.string().default('gpt-4o-mini'),
   OPENAI_REQUEST_TIMEOUT_MS: z.coerce.number().int().positive().default(60000),

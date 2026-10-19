@@ -349,7 +349,7 @@ const fallbackDomainGuidance = (domain: DomainReport) => {
   if (domain.status === 'improving') {
     return `Continue the ${domainName} activities that are working, and add one slightly harder step when the child seems comfortable.`;
   }
-  return null;
+  return `Keep everyday ${domainName} practice playful and notice one small change this week.`;
 };
 
 const domainGuidanceFromReport = (report: DevelopmentReport) => {
@@ -683,9 +683,18 @@ childrenRouter.post('/children/:childId/reports/:reportId/share', requireChildOw
 }));
 
 childrenRouter.get('/children/:childId/expert-guidance', requireChildAccess(), asyncHandler(async (req, res) => {
-  const report = await ReportService.developmentReport(req.params.childId);
+  const [report, todayInsight] = await Promise.all([
+    ReportService.developmentReport(req.params.childId),
+    DailyAiInsightService.getTodayInsight(req.params.childId)
+  ]);
+  const domainGuidance = domainGuidanceFromReport(report);
+  const parentTips = [
+    ...(todayInsight.parentTips ?? []),
+    ...domainGuidance.flatMap((item) => item.guidance ?? [])
+  ].filter((tip, index, items) => tip && items.indexOf(tip) === index).slice(0, 6);
   ok(res, 'Expert guidance', {
-    domainGuidance: domainGuidanceFromReport(report)
+    parentTips,
+    domainGuidance
   });
 }));
 

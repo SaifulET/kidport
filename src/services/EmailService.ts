@@ -32,4 +32,14 @@ export class EmailService {
     const url = `${env.FRONTEND_URL}/daycare-invitations/${token}`;
     return this.sendMail(to, 'A parent assigned a child to your daycare', `<p>${childName} was assigned.</p><p><a href="${url}">Review assignment</a></p>`);
   }
+
+  static contactMessage(input: { name: string; email: string; subject: string; message: string }) {
+    const escape = (value: string) =>
+      value.replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character] ?? character));
+    return this.sendMail(
+      env.CONTACT_EMAIL,
+      `Kidport contact: ${input.subject}`,
+      `<p><strong>From:</strong> ${escape(input.name)} &lt;${escape(input.email)}&gt;</p><p><strong>Subject:</strong> ${escape(input.subject)}</p><p>${escape(input.message).replace(/\n/g, '<br />')}</p>`
+    );
+  }
 }

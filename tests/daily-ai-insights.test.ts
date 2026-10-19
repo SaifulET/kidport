@@ -33,6 +33,11 @@ beforeEach(async () => {
       title: 'Language progress is improving',
       summary: 'Recent observations show steady communication and participation.',
       suggestion: 'Try asking open-ended questions during play today.',
+      parentTips: [
+        'Try asking open-ended questions during play today.',
+        'Name objects during a daily routine.',
+        'Write down one new word you hear.'
+      ],
       domainHighlights: [{ domain: 'Language & Literacy', status: 'steady', keyword: 'improving' }],
       disclaimer: AIAnalysisService.dailyInsightDisclaimer
     },
@@ -102,6 +107,18 @@ describe('DailyAiInsightService', () => {
     expect(await DailyAiInsight.countDocuments()).toBe(2);
     expect(AIAnalysisService.generateDailyInsight).toHaveBeenCalledTimes(2);
   });
+
+  it('always generates parent tips in the fallback insight', () => {
+    const fallback = AIAnalysisService.fallbackDailyInsight({
+      child: { ageMonths: 24 },
+      domainProgress: [{ name: 'Language & Literacy', percentage: 75, stage: 'steady', keyword: 'improving', observationCount: 3 }],
+      observationSummary: { achieved: 1, inProgress: 1, upcoming: 1 },
+      recentObservations: []
+    });
+
+    expect(fallback.parentTips.length).toBeGreaterThan(0);
+    expect(fallback.suggestion).toBeTruthy();
+  });
 });
 
 describe('development progress response', () => {
@@ -136,6 +153,11 @@ describe('development progress response', () => {
     expect(parentResponse.body.data.todayInsight).toMatchObject({
       title: 'Language progress is improving',
       suggestion: 'Try asking open-ended questions during play today.',
+      parentTips: [
+        'Try asking open-ended questions during play today.',
+        'Name objects during a daily routine.',
+        'Write down one new word you hear.'
+      ],
       disclaimer: AIAnalysisService.dailyInsightDisclaimer
     });
     expect(caregiverResponse.body.data.todayInsight).toEqual(parentResponse.body.data.todayInsight);
